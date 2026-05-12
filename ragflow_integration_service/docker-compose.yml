@@ -1,0 +1,9 @@
+services:
+  ragflow-integration-service:
+    build:
+      context: .
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-8081}:8081"
+    restart: unless-stopped

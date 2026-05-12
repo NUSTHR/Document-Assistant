@@ -1,0 +1,6 @@
+adapters
+api
+application
+core
+dto
+ports

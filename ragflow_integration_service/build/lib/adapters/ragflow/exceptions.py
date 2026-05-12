@@ -1,0 +1,2 @@
+class RagflowIntegrationError(Exception):
+    pass

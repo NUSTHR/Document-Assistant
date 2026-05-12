@@ -1,0 +1,934 @@
+日期: 2026-04-23
+
+项目运行检测记录
+
+一、当前可确认的运行状态
+1. 后端服务 `ragflow_integration_service` 可以正常启动。
+2. 后端健康检查 `GET /health` 已验证成功，返回 `{"status":"ok"}`。
+3. 后端当前运行方式为项目内独立虚拟环境 `.venv`，不再依赖全局 Python 解释器启动服务。
+4. 前端项目 `D_ass` 可以正常构建，`npm run build` 已通过。
+5. 前端关键页面代码与后端入口代码当前无 IDE 诊断错误。
+
+二、当前项目实际情况
+1. 项目已经形成明确链路：`D_ass -> ragflow_integration_service -> RAGFlow`
+2. 前端目前已接入内部 integration-service，而不是直接调用 RAGFlow。
+3. 后端已具备最小骨架能力：健康检查、知识库创建入口、文档上传入口、解析入口、检索入口、会话相关入口。
+4. 当前仓库已经不是空模板，但仍处于“集成骨架完成，真实 RAGFlow 联调未完成”的阶段。
+
+三、已确认的问题
+1. `ragflow_integration_service/.env` 中的 `RAGFLOW_API_KEY` 仍是占位值：`ragflow-REPLACE-WITH-YOUR-ACTUAL-KEY`
+2. `ragflow_integration_service/.env` 中的 `RAGFLOW_BASE_URL` 当前是 `http://127.0.0.1`
+3. 由于上述两个配置未接入真实可用的 RAGFlow 实例，当前只能确认后端服务本身可运行，不能确认真实的知识库创建、检索、会话功能可成功调用 RAGFlow。
+4. 项目内 `.venv` 虚拟环境虽然已可用，但依赖安装过程受当前环境的 PyPI SSL 问题影响，未能通过标准 `pip install .` 完成，而是通过本地依赖复制方式补齐运行依赖。
+5. 这种依赖复制方式可以运行当前项目，但环境可复现性弱于标准包安装流程，后续仍应修正网络/证书问题后重新以标准方式安装。
+6. 之前误装到全局 Python 环境中的项目相关包与 `label-studio` 相关冲突包，当前未能物理删除干净。
+7. 未能删除的原因不是项目代码错误，而是当前 IDE 对工作区外目录存在沙箱限制，导致外部 `site-packages` 与 `Scripts` 目录删除被阻断。
+
+四、风险判断
+1. 当前“服务可启动”不等于“RAGFlow 业务功能可用”。
+2. 在真实 `RAGFLOW_BASE_URL` 和 `RAGFLOW_API_KEY` 配置完成之前，前端页面中的知识库创建、检索等功能大概率无法成功完成真实业务调用。
+3. 由于 `.venv` 不是通过标准联网安装构建，后续如果补充依赖、升级依赖或迁移机器，存在额外环境修复成本。
+4. 全局 Python 环境历史残留仍在，因此系统层面还不是完全干净，只是当前项目运行已经与其隔离。
+
+五、本次检测结论
+1. 当前项目“前端构建 + 后端服务启动 + 健康检查”是正常的。
+2. 当前项目“真实 RAGFlow 业务联调”还未完成，阻塞点是 RAGFlow 连接配置未落地。
+3. 当前项目已经可以继续开发，但不能宣称 RAGFlow 集成已真正打通。
+
+---
+
+更新时间: 2026-04-23
+
+六、本次防腐层重构进展
+1. 已将 `ragflow_integration_service` 的核心方向明确收敛为“前端与 RAGFlow 之间的中间防腐层”。
+2. 已新增并切换为基于 Pydantic 的输入输出模型，开始用业务字段替代原先直接面向 RAGFlow 物理 ID 的接口设计。
+3. 已在 Adapter 层实现 `biz_file_id` 埋点规则：上传到 RAGFlow 时会将文件名重写为 `[biz_id:业务ID]原始文件名`。
+4. 已在 Adapter 层实现从 `document_name` 中正则反解 `biz_file_id` 与真实文件名的逻辑；反解失败时会降级为 `UNKNOWN`，不会中断回答。
+5. 已在流式对话适配层实现引用标记清洗逻辑，可将 RAGFlow 返回的内部引用标记替换为标准 Markdown 脚注样式，如 `[^1]`。
+6. 已新增面向前端的核心接口草案：
+   - `POST /api/files`
+   - `POST /api/chat`
+7. `POST /api/chat` 已切换为 `StreamingResponse` 输出 `text/event-stream`。
+
+七、当前仍需确认的问题
+1. 目前实现严格基于本地安装的 `ragflow_sdk` 代码结构完成，但尚未在真实 RAGFlow 实例上完成上传、解析、流式引用回传的全链路验收。
+2. 现阶段 `assistant_name` 与 `knowledge_base_name` 采用名称解析方式定位底层对象，这满足“不向前端暴露物理 ID”的约束，但真实环境中仍需确认命名唯一性策略。
+3. 现有旧版接口文件已经开始收缩，但本轮重点是先建立符合防腐约束的新骨架，后续仍需继续清理历史接口和无效适配逻辑。
+
+八、阶段结论
+1. 项目已经从“可运行的基础骨架”进入“带防腐约束的适配层重构”阶段。
+2. 最关键的边界已经落地：前端 DTO 与 RAGFlow 内部字段开始解耦。
+3. 当前最重要的后续工作不是继续堆功能，而是完成真实 RAGFlow 实例联调，验证上传解析与流式引用返回是否与 SDK 运行结果完全一致。
+
+---
+
+更新时间: 2026-04-23
+
+九、本轮严格规范收口进展
+1. 前端已彻底切换到新的防腐层接口，不再调用旧的知识库创建和检索接口。
+2. 前端已为健康检查、文件上传、SSE 流式对话补充统一错误模型，覆盖超时、断网、HTTP 非 200、响应格式错误等场景。
+3. 前端对普通 JSON 响应与 SSE 数据块增加了运行时结构校验，不再只依赖 TypeScript 类型断言。
+4. 前端已将环境变量、API 请求层、页面状态管理拆分到独立模块，进一步降低单文件复杂度和跨层耦合。
+5. 后端已将健康检查和错误响应收敛为显式 Pydantic 模型，继续减少动态字典返回。
+6. 后端已为上传接口增加空文件早返回校验，并继续把默认值与魔法字符串抽离到常量模块。
+7. 后端适配器已补充更明确的守卫逻辑，避免默认假设底层 SDK 查询一定返回结果。
+
+十、当前状态判断
+1. 当前代码在“类型安全、异常处理、边界隔离”三个维度已经明显比上一版更稳。
+2. 当前前后端的静态诊断、前端构建、后端编译均通过，说明本轮重构没有破坏基本运行面。
+3. 当前仍未完成真实 RAGFlow 实例验收，所以项目状态依然是“架构与代码质量已收紧，但真实业务链路待联调确认”。
+
+---
+
+更新时间: 2026-04-23 真实联调执行计划
+
+十一、接入真实 RAGFlow 的具体做法
+1. 先拿到真实可用的 RAGFlow 服务访问地址，填入 `ragflow_integration_service/.env` 的 `RAGFLOW_BASE_URL`。
+2. 再拿到真实可用的 RAGFlow API Key，填入 `ragflow_integration_service/.env` 的 `RAGFLOW_API_KEY`。
+3. 这里的 `RAGFLOW_BASE_URL` 必须是 RAGFlow 对外可访问的服务根地址，当前代码会自动拼成 `.../api/v1`，因此 `.env` 中不要再手动追加 `/api/v1`。
+4. 修改 `.env` 后，必须重启 `ragflow_integration_service`，否则进程仍会继续使用旧配置。
+
+十二、后端重启后的第一轮验证
+1. 先验证健康检查 `GET /health`，确认 integration-service 自身仍然正常启动。
+2. 健康检查通过后，再验证 integration-service 是否能真正连通底层 RAGFlow。
+3. 这一轮的目的不是看前端页面，而是先确认“配置正确、服务可连、鉴权可过”。
+4. 如果这一步失败，优先排查：
+   - `RAGFLOW_BASE_URL` 是否填成了错误地址
+   - `RAGFLOW_API_KEY` 是否无效或权限不足
+   - integration-service 所在机器是否能访问 RAGFlow 服务
+
+十三、`POST /api/files` 的真实验收方式
+1. 准备一个真实测试文件，内容尽量短且可预期，例如一份只有几段固定文本的 `txt` 或小型 `pdf`。
+2. 选定一个测试知识库名称，例如 `finance-kb-test`。
+3. 选定一个业务文件 ID，例如 `FILE-TEST-0001`。
+4. 选定一个业务文件名，例如 `test-report.txt`。
+5. 调用 `POST /api/files` 上传文件并触发解析。
+6. 验证返回结果中：
+   - `biz_file_id` 是否仍然是 `FILE-TEST-0001`
+   - `biz_file_name` 是否仍然是 `test-report.txt`
+   - `parse_status` 是否进入完成态
+   - `chunk_count` 和 `token_count` 是否大于等于合理值
+7. 这一步的核心不是只看接口是否 `200`，而是确认防腐层埋点逻辑确实成立：文件进入 RAGFlow 后还能被正确反解回业务字段。
+8. 如果上传成功但解析失败，需要重点检查：
+   - RAGFlow 是否支持该文件格式
+   - 底层解析模型或解析能力是否可用
+   - 当前 SDK 返回的 `Document.run` / `status` 是否与代码中的完成态判断一致
+
+十四、`POST /api/chat` 的真实验收方式
+1. 在 `POST /api/files` 验证通过后，再使用同一个知识库语料进行提问。
+2. 为 `assistant_name` 选定一个固定值，例如 `finance-assistant-test`。
+3. 问题内容必须直接命中刚刚上传文件中的文本，避免因为检索不到而误判代码错误。
+4. 调用 `POST /api/chat`，观察返回的 `text/event-stream` 数据块。
+5. 验证流式回答中：
+   - `answer` 是否持续返回文本片段
+   - 回答中的内部引用标记是否已被替换为 `[^1]` 这类脚注样式
+   - `references` 是否返回数组
+   - 每个引用对象中是否都带有 `biz_file_id`、`biz_file_name`、`chunk_content`、`similarity_score`
+6. 这一轮的核心是确认当前防腐层对 RAGFlow SSE 报文结构的假设是否正确，特别是：
+   - `session.ask(..., stream=True)` 返回的 `message.content`
+   - `message.reference`
+   - `reference.document_name`
+7. 如果回答能出来但 `references` 为空，优先怀疑：
+   - 当前 RAGFlow 实例没有返回引用块
+   - SDK 在当前版本下对流式 `reference` 的封装字段与本地读取方式不一致
+8. 如果 `answer` 里仍然残留 `##0$$` 或 `[ID:0]`，说明当前正则清洗规则还不完整，需要根据真实报文补充模式。
+
+十五、联调通过的判断标准
+1. `POST /api/files` 返回业务字段，且解析结果正常。
+2. `POST /api/chat` 能稳定返回流式回答。
+3. 流式回答中的引用标记已被替换为标准脚注格式。
+4. `references` 中不再出现底层 `dataset_id`、`document_id`，而是完整业务字段。
+5. 即使个别引用反解失败，也只能降级为 `UNKNOWN`，不能让整段回答直接中断。
+
+十六、当前最合理的执行顺序
+1. 先填真实 `.env`
+2. 再重启 integration-service
+3. 先验 `GET /health`
+4. 再验 `POST /api/files`
+5. 最后验 `POST /api/chat`
+6. 只有这三步都过，才能说明当前防腐层假设已经被真实 RAGFlow 实例验证
+
+---
+
+更新时间: 2026-04-24 最终可完成收尾
+
+十七、本轮已补齐的可落地项
+1. 已清理前端 `D_ass/README.md`，不再保留默认 Vue 模板说明，改为当前联调控制台的真实用途、环境变量与启动方式说明。
+2. 已补充后端 `ragflow_integration_service/README.md`，加入 Windows/PowerShell 可直接执行的启动、健康检查、上传文件、流式对话调用示例。
+3. 已再次核对当前上传解析实现，确认 `RagflowKnowledgeBaseAdapter` 通过 `ragflow_sdk` 的 `parse_documents(...)` 触发解析，而该 SDK 方法内部已包含轮询等待文档进入终态的机制，因此“等待解析完成”这一核心约束当前并非缺失状态。
+4. 已再次核对前后端静态诊断，当前 IDE 诊断结果为空，说明本轮收尾没有引入新的语法或类型问题。
+
+十八、当前仍然无法在本地客观完成的事项
+1. 无法完成真实 RAGFlow 端到端联调，因为当前仍缺少真实可用的 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY`。
+2. 无法客观确认真实实例下 `session.ask(..., stream=True)` 回传的 `message.reference` 结构是否与本地适配假设百分之百一致，这一步只能在真实实例上验收。
+3. 无法彻底清理历史遗留的全局 Python 包，因为相关目录位于工作区外，受当前环境沙箱限制阻断。
+
+十九、当前项目的客观结论
+1. 当前能完成的工程内工作基本已经完成：接口边界、类型收紧、防腐层适配、前端接入、文档收口、基本运行面验证都已落地。
+2. 当前项目已经具备“填入真实 RAGFlow 配置后立刻进入联调”的条件，但还不能宣称真实业务链路已经打通。
+3. 下一步唯一真正的主阻塞已收敛为真实环境接入与实流验收，不再是本仓库内部代码骨架问题。
+
+---
+
+更新时间: 2026-05-07 整体启动流程梳理
+
+二十、当前项目的实际启动链路
+1. 启动顺序是：`RAGFlow` -> `ragflow_integration_service` -> `D_ass`。
+2. 其中前端 `D_ass` 不直接连接 RAGFlow，只调用本地后端防腐层。
+3. 也就是说，前端页面能不能正常执行业务功能，取决于 `ragflow_integration_service` 是否已经启动，以及它能否连通真实 RAGFlow。
+
+二十一、后端启动流程
+1. 进入目录：`c:\Users\96934\Desktop\Documentation Assistant\ragflow_integration_service`
+2. 当前后端运行依赖项目内 `.venv`，不要再用全局 Python 启动。
+3. 启动命令：
+   `.\.venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 8081`
+4. 启动成功后，先验证：
+   `Invoke-RestMethod -Uri "http://127.0.0.1:8081/health"`
+5. 如果返回 `{"status":"ok"}`，说明 integration-service 自身已经正常起来。
+
+二十二、前端启动流程
+1. 进入目录：`c:\Users\96934\Desktop\Documentation Assistant\D_ass`
+2. 安装依赖：
+   `npm install`
+3. 启动开发服务器：
+   `npm run dev`
+4. 前端默认通过 `VITE_RAGFLOW_INTEGRATION_BASE_URL=http://localhost:8081` 访问后端。
+5. 因此只要后端启动在 `8081`，前端页面就能连到本地防腐层。
+
+二十三、当前配置下哪些部分可以运行
+1. 目前可以正常运行的部分是：
+   - 后端服务启动
+   - `GET /health`
+   - 前端页面加载
+   - 前端到本地 integration-service 的请求链路
+2. 目前不能客观保证正常运行的部分是：
+   - `POST /api/files` 的真实上传与解析
+   - `POST /api/chat` 的真实流式问答与引用返回
+3. 原因不是前端页面或本地服务起不来，而是底层真实 RAGFlow 连接配置还没落地。
+
+二十四、当前明确缺少的关键配置
+1. `ragflow_integration_service/.env` 里的 `RAGFLOW_API_KEY` 现在仍然是占位值：`ragflow-REPLACE-WITH-YOUR-ACTUAL-KEY`
+2. `ragflow_integration_service/.env` 里的 `RAGFLOW_BASE_URL` 当前是：`http://127.0.0.1`
+3. 如果本机并没有在这个地址启动真实 RAGFlow 服务，那么这个地址对当前业务功能来说也是无效配置。
+4. 因此，真正缺少的是：
+   - 真实可访问的 `RAGFLOW_BASE_URL`
+   - 真实可用且有权限的 `RAGFLOW_API_KEY`
+
+二十五、缺少这些配置时会出现的实际结果
+1. 后端 `GET /health` 仍然可以成功，因为它不依赖真实 RAGFlow 连接。
+2. 前端页面也仍然可以打开，因为它只依赖本地 Vite 服务和本地 integration-service。
+3. 但一旦调用 `POST /api/files` 或 `POST /api/chat`，请求进入 Adapter 后就会尝试连接真实 RAGFlow。
+4. 如果 `RAGFLOW_BASE_URL` 不对，或者 `RAGFLOW_API_KEY` 无效，请求会在后端报错，前端会收到失败结果。
+
+二十六、要补做的事情
+1. 在 `ragflow_integration_service/.env` 中把 `RAGFLOW_BASE_URL` 改成真实 RAGFlow 对外根地址。
+2. 在同一个 `.env` 中把 `RAGFLOW_API_KEY` 改成真实 API Key。
+3. 修改后必须重启 `ragflow_integration_service`，否则进程不会加载新配置。
+4. 重启后按这个顺序验证：
+   - 先验 `GET /health`
+   - 再验 `POST /api/files`
+   - 最后验 `POST /api/chat`
+
+二十七、当前最简实际启动结论
+1. 如果只是把“项目整体页面和本地服务”跑起来，现在已经具备条件，直接启动后端和前端即可。
+2. 如果目标是把“真实 RAGFlow 业务能力”一起跑通，当前还差真实 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY`。
+3. 在这两个配置补齐之前，项目只能验证本地运行链路，不能验证真实知识库上传解析和真实流式问答。
+
+---
+
+更新时间: 2026-05-07 RAGFlow 本体独立部署检查
+
+二十八、开始部署前的实际检查结果
+1. 当前机器已安装 `docker.exe`，路径为 `C:\Program Files\Docker\Docker\resources\bin\docker.exe`。
+2. 当前机器未发现已运行的 RAGFlow 相关进程，也未发现可用中的 Docker 容器。
+3. 当前 `Docker Desktop Service (com.docker.service)` 处于 `Stopped` 状态。
+4. 当前执行 `docker ps` 失败，错误为无法连接 `//./pipe/docker_engine`，说明 Docker daemon 当前没有运行。
+5. 当前机器 `git` 可用，因此后续如果 Docker daemon 恢复正常，可以走官方 `git clone` + `docker compose` 路径部署 RAGFlow。
+
+二十九、RAGFlow 的部署位置要求
+1. 根据本项目“RAGFlow 本体与业务集成层强隔离”的设计原则，RAGFlow 本体不应部署到当前 `ragflow_integration_service` 目录内部。
+2. 正确做法是把 RAGFlow 官方仓库单独放到当前项目同级目录，避免把 RAGFlow 源码、容器编排和本项目防腐层混在一起。
+3. 当前这台机器上更合适的位置是：
+   `c:\Users\96934\Desktop\ragflow`
+4. 这样可以保持链路清晰：
+   `D_ass` -> `ragflow_integration_service` -> `独立部署的 RAGFlow`
+
+三十、当前无法继续完成独立部署的原因
+1. 当前不是因为缺少 RAGFlow 官方部署方案，而是因为 Docker 运行环境本身不可用。
+2. 我已经尝试直接拉起 `Docker Desktop.exe`，但进程未成功进入可用状态。
+3. 我也尝试启动 `com.docker.service`，但当前环境无法打开该系统服务。
+4. 在 Docker daemon 未恢复前，无法执行 RAGFlow 官方 `docker compose` 部署，因此当前无法客观完成 RAGFlow 本体落地。
+
+三十一、恢复后应执行的部署路径
+1. 先确保 Docker Desktop 正常启动，且 `docker ps` 不再报 `docker_engine` 管道错误。
+2. 在当前项目外、同级位置克隆官方仓库：
+   `git clone https://github.com/infiniflow/ragflow.git c:\Users\96934\Desktop\ragflow`
+3. 进入官方仓库的 `docker` 目录，按官方稳定版本和 Compose 方式启动。
+4. 待 RAGFlow 本体可访问后，再把真实 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY` 回填到本项目的 `ragflow_integration_service/.env`。
+
+---
+
+更新时间: 2026-05-07 RAGFlow 本体独立部署完成
+
+三十二、当前角色与边界确认
+1. 在本项目中，RAGFlow 扮演“独立底座服务”角色，负责知识库、解析、检索、对话等原生能力。
+2. `ragflow_integration_service` 扮演“中间防腐层”，前端 `D_ass` 只能调用它，不能直接调用 RAGFlow 内部接口。
+3. 因此，RAGFlow 本体必须独立部署在当前项目仓库之外，不能混入 `Documentation Assistant` 内部目录。
+
+三十三、本次实际部署结果
+1. 已确认 Docker 引擎当前可用，`docker info` 与 `docker version` 均可正常返回。
+2. 已将 RAGFlow 官方稳定版 `v0.25.1` 克隆到独立目录：
+   `c:\Users\96934\Desktop\ragflow`
+3. 已在该独立目录下使用官方 `docker/docker-compose.yml` 启动核心容器：
+   - `docker-ragflow-cpu-1`
+   - `docker-mysql-1`
+   - `docker-redis-1`
+   - `docker-minio-1`
+   - `docker-es01-1`
+4. 当前上述容器均已启动，其中 MySQL、Redis、MinIO、Elasticsearch 已进入 healthy 状态，RAGFlow 主容器处于 running 状态。
+
+三十四、本次部署中的合理性处理
+1. 宿主机 `80` 端口已被系统占用，因此没有强行复用默认 Web 端口。
+2. 本次启动时通过环境变量覆盖，将 RAGFlow Web 入口改为：
+   - `18080 -> 80`
+   - `18443 -> 443`
+3. 这样既避免和宿主机现有服务冲突，也不影响当前项目的 `5173` 前端与 `8081` 防腐层链路。
+
+三十五、当前可访问结果
+1. `http://127.0.0.1:18080` 当前已返回 `200 OK`，说明 RAGFlow Web 入口可访问。
+2. `http://127.0.0.1:18080/api/v1/datasets?page=1&page_size=1` 当前返回 `401`，说明 API 网关和后端服务已打通，只是尚未携带认证信息。
+3. `http://127.0.0.1:9380` 直连当前未作为最终外部入口使用，因此后续本项目不应优先使用该地址作为外部接入地址。
+
+三十六、对当前项目的直接影响
+1. 对 `ragflow_integration_service` 来说，后续应优先把 `RAGFLOW_BASE_URL` 设为：
+   `http://127.0.0.1:18080`
+2. 当前还不能立即回填真实 `RAGFLOW_API_KEY`，因为需要先在已启动的 RAGFlow 实例中完成登录并获取 API Key。
+3. 因此，当前状态已经从“RAGFlow 未部署”推进到“RAGFlow 已部署并可访问，但 integration-service 仍缺真实 API Key”。
+
+三十七、当前仍存在的客观风险
+1. 官方文档建议内存至少 `16 GB`，而当前主机总内存约 `15.63 GB`，低于官方建议值。
+2. Docker 当前可见总内存约 `8.13 GB`，这意味着当前实例虽然已经拉起，但后续在模型配置、文件解析和真实对话阶段仍存在资源压力风险。
+3. 由于当前环境对工作区外文件写入有限制，本次端口调整是通过启动时环境变量覆盖完成的；如果后续需要手动重建容器，必须继续使用相同端口覆盖，或者手动修改 `c:\Users\96934\Desktop\ragflow\docker\.env`。
+
+---
+
+更新时间: 2026-05-07 RAGFlow 联通性与 Verba 集成评估
+
+三十八、当前 RAGFlow 是否已经真正打通
+1. 当前新的 `RAGFLOW_API_KEY` 已经验证为可用。
+2. 我已直接请求：
+   `GET http://127.0.0.1:18080/api/v1/datasets?page=1&page_size=1`
+   携带当前 API Key 后返回 `200`，且响应体为 `{"code":0,"data":[],"total_datasets":0}`。
+3. 这说明当前 RAGFlow 本体已经启动正常，且当前 API Key 具备访问权限。
+4. 但本项目 `ragflow_integration_service/.env` 里的 `RAGFLOW_BASE_URL` 仍然写的是 `http://127.0.0.1`，这个地址对当前部署方式来说不是正确入口。
+5. 同一个 Key 如果打到 `http://127.0.0.1/api/v1/datasets`，返回的是 `404 Not Found`，说明当前问题不在 API Key，而在 Base URL。
+6. 当前正确的 RAGFlow 外部入口应当是：
+   `http://127.0.0.1:18080`
+7. 因此，客观结论不是“已经完全打通可直接使用”，而是：
+   - `RAGFlow 本体 + API Key` 已打通
+   - `integration-service -> RAGFlow` 只差把 `RAGFLOW_BASE_URL` 改成正确入口
+
+---
+
+更新时间: 2026-05-07 API Key 有效性与 Verba 集成评估
+
+三十九、当前 integration-service 的实际验证结果
+1. 我已使用临时环境变量覆盖方式启动 `ragflow_integration_service`：
+   - `RAGFLOW_BASE_URL=http://127.0.0.1:18080`
+   - `RAGFLOW_API_KEY=<当前新 Key>`
+2. 服务可以正常启动，`/health` 返回 `200 OK`。
+3. 这说明当前防腐层代码本身没有阻止真实联通，核心阻塞已经进一步收敛为：
+   `ragflow_integration_service/.env` 里的 `RAGFLOW_BASE_URL` 尚未改到正确值。
+4. 在没有把该文件回填为 `http://127.0.0.1:18080` 之前，不能宣称“本项目已经完整打通”。
+
+四十、Verba 在本次评估中的真实定位
+1. Verba 不是一个单纯可替换的“RAG 前端皮肤”。
+2. Verba 官方说明它本身是一套完整 RAG 应用，包含：
+   - `Next.js` 前端
+   - 自带 `FastAPI` 后端
+   - 围绕 `Weaviate` 构建的检索/入库/生成链路
+3. Verba 官方文档还明确说明：
+   - 前端请求是发给它自己，再由它自带的 FastAPI 处理
+   - 当前 FastAPI 主要用于其内部通信，不推荐当作外部公共 API 使用
+4. 同时，Verba 官方 FAQ 明确说明它不能直接复用既有 Weaviate 数据，因为它要求自己的特定数据格式。
+5. 这意味着 Verba 的设计前提是“Verba 主导整套 RAG 栈”，而不是“拿它的前端去挂接别人的 RAG 后端”。
+
+四十一、把 Verba 集成进当前项目的难度评估
+1. 难度不是“小改可接”，而是中高难度。
+2. 难点不在页面样式，而在系统边界完全不同：
+   - 当前项目链路是 `Vue 3 + Vite -> ragflow_integration_service -> RAGFlow`
+   - Verba 链路是 `Next.js 前端 -> Verba FastAPI -> Weaviate/LLM/其自有 RAG 组件`
+3. 如果强行接入 Verba，就不是“接一个前端”，而是要处理两套后端模型、两套数据摄入逻辑、两套检索契约和两套运行时依赖。
+4. 当前项目的核心设计原则是“RAGFlow 作为底座，integration-service 作为唯一防腐层”，而 Verba 默认设计会绕开这条边界。
+5. 因此，如果目标是保持当前项目架构克制、低耦合、可维护，那么直接把 Verba 整套塞进来并不自然。
+
+四十二、如果一定要集成 Verba，唯一合理的技术路径
+1. 不能把 Verba 当完整 RAG 应用直接并入主链路。
+2. 唯一合理路径是：
+   - 只借用 Verba 的前端交互设计或前端局部组件思路
+   - 不复用 Verba 的 Weaviate 数据层
+   - 不复用 Verba 的 FastAPI 作为业务后端
+   - 继续坚持当前 `ragflow_integration_service` 作为唯一后端入口
+3. 更具体地说，技术路径应该是“参考式集成”而不是“原样集成”：
+   - 研究 Verba 的文档展示、引用区块、对话区、检索片段呈现方式
+   - 在当前 `D_ass` 中重建对应的前端交互
+   - 所有数据仍来自 `/api/files` 和 `/api/chat`
+   - 如果需要扩展文档预览能力，应在当前防腐层上新增明确 DTO，而不是去对接 Verba 自带 FastAPI
+4. 如果硬要直接复用代码，理论上也只能走“抽取 Verba 前端页面层并重写其 API 适配层”这一路，但这会涉及：
+   - `Next.js` -> 当前 `Vue 3` 的技术栈迁移或并存
+   - Verba 内部 API 调用逻辑的大量重写
+   - Weaviate 假设到 RAGFlow 假设的整体替换
+5. 这条路工作量明显大于在当前前端中直接实现“文档引用展示 + 文档预览 + 溯源核对”。
+
+四十三、为什么当前不推荐直接集成 Verba
+1. Verba 的核心依赖是 Weaviate 生态，而当前项目底座已经确定为 RAGFlow，底层范式不同。
+2. Verba 不是纯前端组件库，而是自带完整后端和数据流，接入后会冲击当前已建立的防腐层边界。
+3. 当前项目前端技术栈是 `Vue 3 + Vite`，Verba 前端是 `Next.js`，直接复用的技术成本高。
+4. Verba 官方自己也说明当前项目偏社区性质维护，不能按生产级稳定组件对待。
+5. 你当前真正想解决的问题是“让用户更方便地查看引用文档、核对答案”，这并不要求引入整套 Verba 技术栈。
+6. 这个目标在当前前端内直接增强引用展示、文档预览、答案-片段对照能力，成本更低、边界更干净、与现有架构更一致。
+
+四十四、最终结论
+1. 当前 RAGFlow 功能还不能直接宣称“已经完全打通可用”，因为本项目真实 `.env` 中的 `RAGFLOW_BASE_URL` 仍未改成正确入口。
+2. 但新的 API Key 已经客观验证有效，RAGFlow 本体也已正常运行，因此离完整打通只差把：
+   `RAGFLOW_BASE_URL=http://127.0.0.1:18080`
+   正式回填进 `ragflow_integration_service/.env`。
+3. 对 Verba 的结论是：不推荐直接整体集成。
+4. 如果只是欣赏 Verba 的交互效果，推荐做法是“参考其前端交互设计，在当前 `D_ass` 中重建文档展示与答案核对界面”，而不是把 Verba 的整套 Weaviate-RAG 应用直接接入当前项目。
+
+---
+
+更新时间: 2026-05-07 模仿 Verba 前端交互的实施规划
+
+四十五、如果由我来完成代码编写，整体原则
+1. 不引入 Verba 的 `Next.js`、`FastAPI`、`Weaviate` 技术栈。
+2. 只借鉴 Verba 的交互体验与信息布局，不破坏当前链路：
+   `D_ass -> ragflow_integration_service -> RAGFlow`
+3. 继续保持 `ragflow_integration_service` 为唯一后端入口，前端不得直接连接 RAGFlow。
+4. 实现目标不是“复刻 Verba 项目”，而是“在当前项目中落地 Verba 风格的文档核对型 RAG 交互界面”。
+
+四十六、我建议重建的前端交互结构
+1. 当前单页控制台应重构为更接近 RAG 工作台的三栏或双栏布局。
+2. 核心界面建议拆成以下区域：
+   - 左侧：知识库/文件面板
+   - 中间：对话主区
+   - 右侧：引用与文档预览区
+3. 左侧文件面板负责展示：
+   - 已上传文件列表
+   - 当前选中文件
+   - 上传入口
+   - 解析状态
+4. 中间对话区负责展示：
+   - 提问输入框
+   - 流式回答气泡
+   - 回答中的脚注锚点
+   - 会话状态
+5. 右侧引用区负责展示：
+   - 当前回答引用到的文档块
+   - 按引用序号分组后的片段
+   - 文档名、业务文件 ID、相似度
+   - 点击引用后高亮对应片段
+
+四十七、如果让我写代码，前端会怎么拆
+1. 当前 `App.vue` 不应继续承载全部页面结构，而应改为页面容器。
+2. 我会把页面至少拆成以下组件：
+   - `KnowledgeSidebar.vue`
+   - `ChatWorkspace.vue`
+   - `AnswerMessage.vue`
+   - `ReferencePanel.vue`
+   - `DocumentPreviewPanel.vue`
+   - `UploadDialog.vue` 或 `UploadPanel.vue`
+3. 状态层不再只保留一个 `useIntegrationConsole()`，而是继续沿 composable 方式拆分为：
+   - `useKnowledgeFiles()`
+   - `useChatSession()`
+   - `useReferenceViewer()`
+   - 必要时保留一个组合层 `useRagWorkspace()`
+4. 这样做的原因是后续文档预览、引用联动、文件列表管理会明显超出当前单 composable 的职责范围。
+
+四十八、为了实现 Verba 风格体验，后端需要补哪些最小能力
+1. 当前 `/api/chat` 已经能返回 `answer + references`，这足够支撑第一阶段 UI 改造。
+2. 但如果要把“文档核对”体验做得真正可用，当前后端 DTO 还应补充更适合预览的字段。
+3. 我建议后端后续增加的能力是：
+   - 文件列表查询接口
+   - 单文件详情接口
+   - 引用片段在文档中的定位信息
+   - 可选的文档预览地址或文档下载地址
+4. 这些新增字段必须仍然使用业务视角 DTO，不能暴露 RAGFlow 物理 ID。
+5. 第一阶段即便没有文档预览，也可以先完成“回答区 + 引用区 + 文件区”的交互闭环。
+
+四十九、如果由我实施，推荐分三阶段推进
+1. 第一阶段：重构当前控制台为 Verba 风格工作台
+   - 保留现有上传与提问能力
+   - 重做页面布局
+   - 把回答区和引用区拆开
+   - 支持点击引用后聚焦对应引用卡片
+2. 第二阶段：补齐文件工作区体验
+   - 展示文件列表
+   - 展示解析状态
+   - 让上传结果进入文件面板，而不是只停留在顶部结果块
+3. 第三阶段：增强文档核对能力
+   - 文档预览
+   - 片段定位
+   - 回答脚注与右侧片段联动
+   - 文件筛选与会话上下文增强
+
+五十、如果让我直接开始写代码，实际切入顺序
+1. 先重构 `D_ass/src/App.vue`，把当前页面从“表单堆叠”改为“工作台布局骨架”。
+2. 再拆 `useIntegrationConsole()`，把聊天状态和文件状态分离。
+3. 接着补一层前端展示模型，把后端返回的 `references` 转成适合 UI 渲染的引用视图数据。
+4. 然后实现回答区、引用区、文件区三块组件，并接通现有 `/api/files` 与 `/api/chat`。
+5. 第一轮代码完成后，再评估是否需要追加后端接口来支撑文档预览和文件列表。
+
+五十一、当前这条路线的优点
+1. 保持现有项目边界不变，不会把 Verba 的后端范式引进来。
+2. 代码复用度高，当前 `integration-api.ts`、类型定义和流式逻辑都可以继续沿用。
+3. 成本集中在前端界面和状态重构，而不是整套技术栈替换。
+4. 最终交互效果可以明显向 Verba 靠近，但系统维护成本远低于直接引入 Verba。
+
+五十二、当前建议的最终执行方案
+1. 如果目标是“让我来完成代码编写”，最合理的方案就是：
+   - 不集成 Verba 项目本身
+   - 直接在当前 `D_ass` 内实现一套 Verba 风格工作台
+2. 第一轮先只做前端重构，不急着引入新的后端接口。
+3. 等第一轮界面成型后，再根据真实使用效果决定是否补文件列表、文档预览、片段定位等后端能力。
+
+---
+
+更新时间: 2026-05-08 第二阶段继续推进
+
+五十三、这一次继续推进的目标
+1. 在保证当前防腐层边界不变的前提下，继续完善第二阶段“文件工作区体验”。
+2. 核心判断是：单纯继续堆前端状态收益已经下降，下一步最小且必要的能力应当是“文件列表查询”。
+3. 因此，本轮没有引入文档预览或定位能力，而是先补文件工作区真正缺失的最小后端接口。
+
+五十四、本轮新增的后端最小能力
+1. 在 `ragflow_integration_service` 中新增了 `GET /api/files?knowledge_base_name=...`。
+2. 该接口通过 `ragflow_sdk` 的 `dataset.list_documents(...)` 获取指定知识库下的文档列表。
+3. 返回结果仍然只包含业务视角字段：
+   - `knowledge_base_name`
+   - `biz_file_id`
+   - `biz_file_name`
+   - `parse_status`
+   - `chunk_count`
+   - `token_count`
+4. 本轮仍然没有暴露任何 RAGFlow 内部物理 ID，防腐层边界保持不变。
+
+五十五、本轮后端兼容修正
+1. 在真实联调中发现，`ragflow_sdk.list_datasets(name=...)` 对“指定知识库不存在”的场景并不会稳定返回空数组，而可能直接抛异常。
+2. 如果不处理这个 SDK 行为，前端在刷新文件列表时会直接收到 `502 failed to list knowledge base files`。
+3. 本轮已在适配层对该类异常做兼容处理，使“知识库不存在/当前 Key 无可见结果”的列表场景安全降级为空列表，而不是直接让工作区报错中断。
+
+五十六、本轮新增的前端能力
+1. 左侧文件工作区已从“仅显示前端会话内上传结果”进一步升级为“可主动从后端刷新真实文件列表”。
+2. 前端已新增文件列表接口契约与解析逻辑，并在上传成功后自动刷新对应知识库的文件列表。
+3. 文件工作区新增了显式的“刷新列表”入口和“同步中”状态。
+4. 文件卡片现在可以更明确地区分：
+   - 当前选中文件
+   - 已被当前回答引用的文件
+   - 当前激活引用来源文件
+5. 当前文件摘要、工作区摘要和右侧核对区之间的上下文关系进一步增强。
+
+五十七、真实运行验证结果
+1. 前端构建通过：`D_ass` 下 `npm run build` 成功。
+2. 后端编译通过：`ragflow_integration_service` 下 `.\.venv\Scripts\python -m compileall app` 成功。
+3. 后端以真实 `.env` 启动后，新的文件列表接口已做真实请求验证：
+   `GET http://127.0.0.1:8081/api/files?knowledge_base_name=demo-kb`
+4. 当前该请求已返回：
+   `{"knowledge_base_name":"demo-kb","files":[]}`
+5. 这说明本轮新增接口已经不只是“代码存在”，而是已经通过真实运行面验证。
+
+五十八、当前仍未进入的下一阶段能力
+1. 本轮仍未补文件原文预览能力。
+2. 本轮仍未补片段定位或页码定位能力。
+3. 本轮也没有新增单文件详情接口，因为当前第二阶段还没有被这些能力卡住。
+4. 当前最合理的下一步，已经从“文件工作区体验”逐渐推进到“第三阶段的最小预览支撑能力评估”。
+
+---
+
+更新时间: 2026-05-08 继续推进到文件详情预览
+
+五十九、本轮继续推进的判断
+1. 当前再单纯堆前端状态收益已经不高，真正能够明显增强核对体验的最小能力是“单文件详情 + chunk 预览”。
+2. `ragflow_sdk` 已经提供 `document.list_chunks(...)`，因此这一步可以在不暴露物理 ID、不引入原文预览复杂度的前提下落地。
+3. 因此，本轮选择补的是“文件详情接口”和“右侧核对区的 chunk 预览能力”，而不是直接进入 PDF 预览或页码定位。
+
+六十、本轮新增的后端能力
+1. 新增了：
+   `GET /api/files/detail?knowledge_base_name=...&biz_file_id=...`
+2. 该接口返回的仍然是业务视角 DTO，包括：
+   - `knowledge_base_name`
+   - `biz_file_id`
+   - `biz_file_name`
+   - `parse_status`
+   - `chunk_count`
+   - `token_count`
+   - `chunks[{ sequence, content }]`
+3. 接口内部逻辑是：
+   - 先根据知识库名找到 dataset
+   - 再根据 `biz_file_id` 反解定位对应 document
+   - 最后调用 `document.list_chunks(...)` 获取预览所需 chunk
+4. 整个过程仍然没有向前端暴露任何 `dataset_id`、`document_id`、`chunk_id`。
+
+六十一、本轮新增的前端能力
+1. 新增了独立的文件详情加载层，不把详情拉取逻辑塞回页面模板或现有大 composable。
+2. 右侧“文档核对区”现在已经不只是显示当前文件摘要和当前激活引用，而是能显示：
+   - 当前文件详情
+   - 当前文件的 chunk 预览列表
+   - 与当前激活引用发生内容匹配的 chunk 高亮
+3. 面板中还新增了“刷新详情”入口，并显式处理了加载中状态。
+4. 因此，当前右侧区域已经从“纯静态核对提示”进一步推进为“轻量文件详情预览面板”。
+
+六十二、真实运行验证结果
+1. 前端构建通过：`D_ass` 下 `npm run build` 成功。
+2. 后端编译通过：`ragflow_integration_service` 下 `.\.venv\Scripts\python -m compileall app` 成功。
+3. 运行面验证时发现，`8081` 端口上原先仍有一个遗留的全局 Python `uvicorn` 进程在运行：
+   `C:\Users\96934\AppData\Local\Programs\Python\Python311\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8081`
+4. 该旧进程会导致本轮新增路由不可见，并继续污染“不要再用全局 Python 运行本项目”的约束。
+5. 本轮已将该全局旧进程停止，并改为使用项目内 `.venv` 重新拉起 `ragflow_integration_service`。
+6. 重启后已真实验证：
+   - `GET /api/files?knowledge_base_name=demo-kb` 返回 `200` 且 `files=[]`
+   - `GET /api/files/detail?knowledge_base_name=demo-kb&biz_file_id=FILE-1` 在文件不存在场景下返回 `404`
+7. 这说明新的文件详情接口已经正确注册，且不存在时的行为符合预期。
+
+六十三、当前仍未完成的能力边界
+1. 本轮新增的是“chunk 预览”，不是原文文件下载或 PDF 页面预览。
+2. 当前仍然没有页码、原文坐标、切片位置等精确信息。
+3. 因此，当前右侧面板已经可以更好地做“答案-片段人工核对”，但还不能做到“点击引用后直接跳转原文具体位置”。
+4. 如果后续继续推进，最合理的下一步已经收敛为：
+   - 单文件更完整详情
+   - 片段定位信息
+   - 可控的原文预览/下载入口
+
+---
+
+更新时间: 2026-05-08 继续推进到原文下载与浏览器预览入口
+
+六十四、本轮继续推进的目标
+1. 在现有“文件详情 + chunk 预览”的基础上，继续补齐“可控的原文预览/下载入口”。
+2. 这一步不做伪造页码定位，也不直接宣称支持所有文件格式的浏览器预览。
+3. 实际策略是：
+   - 后端新增按业务 ID 获取原文内容的二进制接口
+   - 前端只对浏览器天然支持的格式做内嵌预览
+   - 其他格式明确降级为“打开/下载原文”
+
+六十五、本轮新增的后端能力
+1. 新增了：
+   `GET /api/files/content?knowledge_base_name=...&biz_file_id=...`
+2. 该接口内部仍然通过知识库名和 `biz_file_id` 定位文档，不暴露任何 RAGFlow 物理 ID。
+3. 成功时返回二进制内容，并根据文件名推断 `Content-Type`。
+4. 响应头中已设置 `Content-Disposition: inline`，因此浏览器对支持的格式可直接预览，不支持的格式则会自然退化为下载。
+
+六十六、本轮新增的前端能力
+1. 新增了独立的文件原文加载层，专门负责：
+   - 拉取原文 Blob
+   - 管理对象 URL 生命周期
+   - 判定预览模式
+2. 当前前端支持的模式是：
+   - PDF 内嵌预览
+   - 图片内嵌预览
+   - 文本内嵌预览（当前仅展示前 200 KB）
+   - 其他格式的下载/打开入口
+3. 当前文件切换时，原文预览状态会显式重置，不会把旧文件的 Blob URL 错挂到新文件上。
+4. 因此，右侧核对区现在已经形成三层能力：
+   - 当前引用
+   - chunk 预览
+   - 原文预览/下载入口
+
+六十七、真实运行验证结果
+1. 前端构建通过：`D_ass` 下 `npm run build` 成功。
+2. 后端编译通过：`ragflow_integration_service` 下 `.\.venv\Scripts\python -m compileall app` 成功。
+3. 为做真实验证，我临时上传了一个文本文件到：
+   - `knowledge_base_name=demo-kb`
+   - `biz_file_id=FILE-PREVIEW-1`
+   - `biz_file_name=sample-preview.txt`
+4. 上传接口已真实返回成功，但当前解析状态是：
+   `parse_status=FAIL`
+5. 这说明：
+   - 文档已进入知识库
+   - 但 RAGFlow 当前并未成功解析这个样例文本
+6. 继续验证后确认：
+   - `GET /api/files?knowledge_base_name=demo-kb` 返回 `200`，且能看到该文件记录
+   - `GET /api/files/detail?...` 返回 `200`，但 `chunks=[]`
+   - `GET /api/files/content?...` 返回 `200`
+   - `Content-Type` 为 `text/plain; charset=utf-8`
+   - 下载后的文件内容与原始文本完全一致
+7. 因此可以客观确认：
+   - “原文下载/浏览器预览入口”已经打通
+   - 但“解析成功 -> chunk 产出 -> 更丰富核对体验”这部分仍受当前 RAGFlow 解析结果影响
+
+六十八、本轮遇到的问题与处理
+1. 在验证二进制内容接口时，首次使用 `Invoke-WebRequest` 被 PowerShell 安全提示卡住。
+2. 这不是接口实现错误，而是命令本身触发了交互式确认。
+3. 处理方式是改用：
+   `Invoke-WebRequest -UseBasicParsing`
+   从而避免交互阻塞。
+4. 本轮还发现，当前真实示例文本上传后 `parse_status=FAIL`，这会直接导致文件详情中的 `chunks=[]`。
+5. 这不是本轮新增接口的错误，而是当前 RAGFlow 对该样例文件的解析结果未成功。
+
+六十九、当前阶段的客观结论
+1. 右侧核对区的“轻量原文预览入口”已经落地。
+2. 当前项目已经具备：
+   - 文件列表
+   - 文件详情
+   - chunk 预览
+   - 原文下载/浏览器可预览格式的内嵌预览
+3. 当前真正尚未打通的是“原文精确定位能力”，也就是：
+   - 页码
+   - 坐标
+   - 切片在原文中的位置映射
+4. 如果继续推进，下一步最合理的目标已进一步收敛为：
+   - 解析失败原因排查
+   - 片段定位信息
+   - 原文定位级预览
+
+---
+
+更新时间: 2026-05-11 继续推进到解析失败原因透出
+
+七十一、本轮继续推进的判断
+1. 上一轮已经客观确认：文件原文下载和浏览器预览入口已打通，但真实样例文件在 RAGFlow 中解析失败。
+2. 如果前端只能看到 `parse_status=FAIL` 和空 `chunks`，仍然不足以指导后续排障，因为真正的阻塞细节还藏在 RAGFlow 文档对象的 `progress_msg` 中。
+3. 因此，本轮没有盲目继续堆“定位能力”或“更复杂预览”，而是先把解析失败原因做成明确的前后端契约。
+
+七十二、本轮新增的后端能力
+1. 后端文件结果模型现在新增了 `parse_message` 字段，覆盖：
+   - `POST /api/files`
+   - `GET /api/files`
+   - `GET /api/files/detail`
+2. 该字段由适配层从 RAGFlow SDK 文档对象的 `progress_msg` 中提取，并在返回前做空值规整。
+3. 这样前端不需要直连 RAGFlow，也不需要感知底层物理 ID 或 SDK 细节，就能直接拿到当前文件的解析失败原因。
+
+七十三、本轮新增的前端能力
+1. 左侧文件工作区的文件卡片现在会直接展示 `parse_message`，不再只显示抽象的 `FAIL` 状态。
+2. “当前文件摘要”和右侧“文件详情预览”面板也会同步展示解析失败详情。
+3. 当文件详情没有 chunk 且存在 `parse_message` 时，右侧面板会明确提示应先处理解析失败问题，而不是误导性地只展示“暂无 chunk”。
+4. 同时修正了右侧面板中过期的说明文案，当前说明已经与真实能力一致：现阶段已具备原文预览入口，但尚未具备页码级定位和精确跳转。
+
+七十四、本轮验证结果
+1. 后端编译通过：
+   `ragflow_integration_service` 下 `.\.venv\Scripts\python -m compileall app` 成功。
+2. 前端构建通过：
+   `D_ass` 下 `npm run build` 成功。
+3. IDE 诊断结果为空，说明本轮没有引入新的静态错误。
+
+七十五、当前真实阻塞与客观结论
+1. 当前真正阻碍任务继续完成的原因，已经客观定位为 RAGFlow 实例本身未配置默认 embedding model。
+2. 已直接从 RAGFlow 文档元信息中确认失败信息包含：
+   `Fail to bind embedding model: No default embedding model is set.`
+3. 这不是当前仓库前后端代码错误，而是 RAGFlow 本体运行配置缺失。
+4. 在 RAGFlow 配置默认 embedding model 之前，会持续出现这些结果：
+   - `parse_status=FAIL`
+   - `chunk_count=0`
+   - `chunks=[]`
+   - 无法继续完成基于真实 chunk 的引用核对、定位和更完整问答验证
+5. 因此，当前代码侧能做的推进已经继续完成；下一阶段若要继续推进真实 RAG 效果验证，前提是先修复 RAGFlow 本体的 embedding model 配置。
+
+---
+
+更新时间: 2026-05-11 embedding 配置复验与聊天链路继续推进
+
+七十六、embedding model 配置复验结果
+1. 当前 `ragflow_integration_service/.env` 已指向正确 RAGFlow 入口：
+   `RAGFLOW_BASE_URL=http://127.0.0.1:18080`
+2. 直接请求 `http://127.0.0.1:18080/api/v1/datasets` 已返回 `200`，说明当前 API Key 仍然有效。
+3. 重新上传测试文件：
+   - `knowledge_base_name=demo-kb`
+   - `biz_file_id=EMBED-CHECK-20260511`
+   - `biz_file_name=sample-embedding-verify.txt`
+4. 上传接口真实返回：
+   - `parse_status=DONE`
+   - `chunk_count=1`
+   - `token_count=64`
+5. 继续验证：
+   - `GET /api/files` 可见该文件
+   - `GET /api/files/detail` 返回真实 chunk
+   - `GET /api/files/content` 返回 `200`，原文内容正确
+6. 结论很明确：此前“未配置默认 embedding model”这个阻塞已经解除，当前 RAGFlow 的文件解析链路恢复正常。
+
+七十七、本轮继续推进到聊天协议兼容修正
+1. 在继续验证 `/api/chat` 时，先再次发现 `8081` 端口曾被全局 Python 的旧版 `uvicorn` 占用。
+2. 本轮已再次停掉该旧进程，并明确改用项目内 `.venv` 重新启动当前代码。
+3. 随后确认，当前机器上的 RAGFlow Web/API 与本地 `ragflow_sdk` 之间存在实际协议漂移：
+   - `GET /api/v1/chats` 现返回 `data={ chats: [...], total: ... }`
+   - 但本地 SDK 仍假设 `data` 是数组
+4. 此外，当前 RAGFlow 的聊天完成接口要求请求体携带 `messages`，而本地 SDK 仍沿用旧的 `question` 字段。
+5. 为避免继续被旧 SDK 直接卡死，本轮已在本项目适配层里改为：
+   - 手动兼容新结构的 chat 列表读取
+   - 直接按当前 RAGFlow 实际协议调用 `/api/v1/chat/completions`
+   - 手动解析 SSE 数据块
+   - 在 SSE 已开始后即使出错，也改为输出显式错误消息，而不是直接把连接炸断
+
+七十八、当前 `/api/chat` 的真实验证结果
+1. 当前 `/api/chat` 现在已经可以稳定返回 `text/event-stream`，不会再因为服务端中途抛异常而把连接直接打断。
+2. 对未绑定知识库的 `assistant_name=demo-assistant`，接口已可持续返回流式文本，但 `references=[]`。
+3. 进一步检查后确认，这个 assistant 在 RAGFlow 中：
+   - `dataset_ids=[]`
+   - `kb_names=[]`
+4. 这说明它并没有绑定任何知识库，因此它不具备真正的 RAG 检索上下文。
+5. 随后针对已绑定 `demo-kb` 的 `assistant_name=demo-kb-assistant` 再次验证 `/api/chat`，接口返回：
+   `ERROR: Model Name is required`
+6. 这说明新的主阻塞已经从 embedding 配置转移为：
+   **RAGFlow 聊天助手对应的模型配置仍不完整或当前实例不可用于该 chat completion 链路**
+
+七十九、当前阶段的客观结论
+1. 文件侧链路已经真实恢复：
+   - 上传
+   - 解析
+   - chunk 产出
+   - 原文下载
+   - 文件详情预览
+2. 聊天侧链路的代码兼容工作已经继续推进并落地，至少解决了：
+   - 旧 SDK 的 chat 列表结构不兼容
+   - 旧 SDK 仍发 `question` 而不是 `messages`
+   - SSE 报错时连接直接中断
+3. 当前剩余阻塞已经进一步收敛为 RAGFlow 本体聊天配置问题，而不是本仓库文件解析能力或当前防腐层基本实现问题。
+4. 在 RAGFlow 侧把目标 chat assistant 的模型配置补完整之前，`/api/chat` 还不能客观宣称“真实 RAG 问答与引用完全打通”。
+
+---
+
+更新时间: 2026-05-11 网页端可聊而 integration-service 失败的根因定位
+
+八十、为什么网页端能聊，而这里之前不行
+1. 根因不是一个点，而是两层问题叠加：
+   - 历史知识库 `demo-kb` 本身的 embedding 配置没有完整落到数据集记录中
+   - 本项目聊天适配层最初仍按旧版 SDK 协议组装 chat 请求与 SSE 结果
+2. 直接查看 `demo-kb` 的真实数据集对象可见：
+   - `embedding_model=""`
+   - `tenant_embd_id=null`
+   - `parser_config.llm_id=""`
+3. 这解释了为什么它会出现一个非常容易误判的现象：
+   - 文档上传与解析现在已经能成功
+   - 但真正进入 chat 检索路径时，RAGFlow 仍可能因为知识库自身模型字段为空而报 `Model Name is required`
+4. 也就是说，`demo-kb` 属于“历史创建时配置不完整的旧知识库”，不是“当前 embedding 默认模型完全无效”。
+
+八十一、本轮交叉验证结果
+1. 我重新创建了一个新的知识库：
+   `demo-kb-v2`
+2. 这个知识库是在 embedding 配置完成之后才创建的，直接查看其数据集对象可见：
+   - `embedding_model="BAAI/bge-m3@SILICONFLOW"`
+   - `parser_config.llm_id="deepseek-ai/DeepSeek-R1@SILICONFLOW"`
+3. 然后基于 `demo-kb-v2` 新建 `demo-kb-v2-assistant` 并再次调用本项目 `/api/chat`。
+4. 结果已经真实打通：
+   - SSE 正常持续输出
+   - 最终回答中已出现 `[^1]`
+   - `references` 已返回业务字段
+   - `biz_file_id=EMBED-CHECK-V2`
+   - `biz_file_name=sample-embedding-verify-v2.txt`
+5. 这说明：
+   - 当前网页端“能聊”这件事本身没有问题
+   - 当前 integration-service 在修正协议兼容后，对“正确配置的新 assistant + 新知识库”也已经能聊
+
+八十二、本轮继续推进的代码修正
+1. 聊天适配层已兼容当前 RAGFlow 实际 API：
+   - 不再依赖旧 SDK 的 `list_chats()` 返回结构假设
+   - 不再使用旧的 `question` 请求体，而改为 `messages`
+2. SSE 解析已改为兼容当前 RAGFlow 返回格式，并在服务端异常时显式输出错误，而不是把连接直接打断。
+3. 还修正了两个实际问题：
+   - 前端期望“累计答案”，后端此前却发送“增量片段”
+   - `references` 在最终事件里被 Pydantic 校验拦截
+4. 现在这些问题都已经修正，并通过 `demo-kb-v2-assistant` 的真实问答验证。
+
+八十三、当前最终结论
+1. 如果使用的是历史知识库 `demo-kb`，它仍然可能在聊天检索链路上失败，因为这个旧库的 embedding 相关字段没有完整落库。
+2. 如果使用的是在 embedding 配置完成后新建的知识库和 assistant，例如：
+   - `demo-kb-v2`
+   - `demo-kb-v2-assistant`
+   则当前 integration-service 已经能够真实完成问答与引用返回。
+3. 因此，“网页端能聊而这里不行”的真实原因不是简单一句“模型没配好”，而是：
+   - 旧知识库历史配置残缺
+   - 外加本项目先前对新版 RAGFlow 聊天协议的兼容还不完整
+4. 本轮已经把第二部分代码问题修掉；第一部分则需要避免继续复用旧知识库 `demo-kb` 作为聊天验证对象。
+
+---
+
+更新时间: 2026-05-12 项目全局梳理与当前状态复盘
+
+八十四、本轮对项目结构的重新确认
+1. 当前根目录不是 Git 仓库，`D_ass` 和 `ragflow_integration_service` 两个子目录也都不是 Git 仓库，因此无法用 `git diff/status` 追踪变更来源。
+2. 项目主体分为两部分：
+   - `D_ass`：Vue 3 + TypeScript + Vite 前端工作台
+   - `ragflow_integration_service`：FastAPI + ragflow-sdk 的 RAGFlow 防腐层服务
+3. 根目录还保留了联调用样例文件：
+   - `chat-request.json`
+   - `chat-request-kb.json`
+   - `chat-request-kb-v2.json`
+   - `chat-request-audit.json`
+   - `sample-embedding-verify.txt`
+   - `sample-embedding-verify-v2.txt`
+4. 目录中存在明显生成物或运行产物：
+   - `D_ass/node_modules`
+   - `D_ass/dist`
+   - `ragflow_integration_service/build`
+   - `ragflow_integration_service/app/**/__pycache__`
+   - `*.out.log` / `*.err.log`
+5. 本轮阅读时以后端 `app` 与前端 `src` 为主，未把依赖目录和构建产物当作主要事实来源。
+
+八十五、前端 `D_ass` 的当前定位
+1. 前端已经不是单纯的早期接口联调页，而是一个三栏式 RAG Search Workspace。
+2. 当前核心体验是：
+   - 左侧：知识库名称、服务健康检查、文件上传、文件列表、当前文件摘要
+   - 中间：助手名称、会话名称、问题输入、流式回答展示、回答取消
+   - 右侧：引用卡片、激活引用、文件 chunk 预览、原文加载/预览/下载
+3. 前端配置入口在 `src/config/app-config.ts`：
+   - 默认后端地址：`http://localhost:8081`
+   - 普通请求超时：`10000ms`
+   - SSE 连接超时：`15000ms`
+4. `src/lib/integration-api.ts` 对后端响应做了较严格的运行时结构校验，避免后端返回格式漂移时静默失败。
+5. `src/lib/api-client.ts` 已经区分了 timeout、network、http、invalid_response、stream 等错误类型，并映射成前端可展示的信息。
+6. `useKnowledgeFiles`、`useChatSession`、`useFileDetailPreview`、`useFileAssetPreview`、`useReferenceViewer` 的职责分离比较清楚，当前前端状态组织是可继续维护的。
+7. 本轮实际执行 `npm.cmd run build`，结果通过：
+   - `vue-tsc -b` 通过
+   - `vite build` 通过
+   - 产物输出到 `D_ass/dist`
+
+八十六、后端 `ragflow_integration_service` 的当前定位
+1. 后端是一个明确的 RAGFlow 防腐层，而不是直接把 RAGFlow 物理 ID 暴露给前端的薄代理。
+2. FastAPI 入口在 `app/main.py`，当前注册：
+   - `GET /health`
+   - `/api/files` 系列文件接口
+   - `POST /api/chat` 流式聊天接口
+3. 配置在 `app/core/config.py`，通过 `.env` 读取：
+   - `RAGFLOW_BASE_URL`
+   - `RAGFLOW_API_KEY`
+   - `RAGFLOW_TIMEOUT_SECONDS`
+   - CORS 与应用端口等配置
+4. 文件链路主要在 `RagflowKnowledgeBaseAdapter`：
+   - 按 `knowledge_base_name` 查找或创建 dataset
+   - 上传时把业务文件 ID 写入 RAGFlow document display name，格式为 `[biz_id:xxx]文件名`
+   - 对前端返回 `biz_file_id`、`biz_file_name`、解析状态、chunk 数和 token 数
+   - 支持文件列表、文件详情 chunk 预览、原文下载
+5. 聊天链路主要在 `RagflowConversationAdapter`：
+   - 不再完全依赖旧 SDK 的 `list_chats()` 假设
+   - 当前手动调用 `/chats` 兼容 `data={ chats, total }` 与旧数组结构
+   - 当前手动调用 `/chat/completions`，请求体使用 `messages`
+   - 解析 RAGFlow SSE 数据块，累计 answer 后再输出给前端
+   - 将 RAGFlow 内部引用标记清洗为 `[^1]` 形式
+   - 从引用的 `document_name/docnm_kwd` 反解业务文件 ID 与业务文件名
+6. `/api/chat` 的生成器在 SSE 已建立后遇到 RAGFlow 错误时，会输出 `ERROR: ...` 结构化消息并发送 done 事件，避免直接炸断前端流读取。
+
+八十七、本轮发现的维护风险与环境问题
+1. `app/adapters/ragflow/mappers.py` 是一个明显的历史遗留文件：
+   - 当前主链路没有引用它
+   - 它导入的 `ChatResult`、`ChunkResult`、`CompletionResult`、`DatasetResult`、`DocumentResult`、`SessionResult` 在当前 `app/dto/results.py` 中已经不存在
+   - 如果后续有人重新引用该文件，会立刻触发导入错误
+2. 后端当前本地 Python 环境不可直接验证：
+   - `ragflow_integration_service/.venv/pyvenv.cfg` 指向 `C:\Users\96934\AppData\Local\Programs\Python\Python311\python.exe`
+   - 本轮运行 `.venv\Scripts\python -m compileall app` 失败
+   - 本轮运行 `.venv\Scripts\python -c "import app.main"` 失败
+   - 全局 `python` 命令不可用
+   - `py` 启动器指向旧的 `C:\D disk\python\python3.7\python.exe`，同样不可用
+3. 因此，本轮只确认了后端源码结构与设计意图，未完成后端 import/compile 级别的本机验证。
+4. 当前 `integration-service.out.log`、`integration-service.err.log`、`dev-server.out.log`、`dev-server.err.log` 均为空，不能作为运行成功或失败的依据。
+5. 本轮尝试查询 5173、8081、18080 端口监听状态时被系统拒绝访问，因此也不能把当前服务监听状态写成已确认事实。
+
+八十八、当前阶段结论
+1. 从源码看，这个项目已经形成了比较完整的“文档上传入库 + RAG 问答 + 引用核对 + 原文/片段预览”的工作台闭环。
+2. 前端工程状态良好，至少当前 TypeScript 与生产构建是通过的。
+3. 后端核心架构清晰，且与前面日志中记录的真实联调结论一致：使用正确配置的新知识库和 assistant，例如 `demo-kb-v2` / `demo-kb-v2-assistant`，才是有效验证路径。
+4. 旧知识库 `demo-kb` 仍不应作为后续聊天链路验证对象，因为它历史创建时 embedding/model 字段存在残缺。
+5. 继续推进前，最值得先处理的是后端 Python 环境：
+   - 重建或修复 `ragflow_integration_service/.venv`
+   - 确认 `python 3.11` 可用
+   - 重新安装 `pyproject.toml` 依赖
+   - 再跑 `compileall`、`import app.main` 和真实 `/health`、`/api/files`、`/api/chat` 验证
+6. 代码清理层面，建议后续删除或修复未使用且已失效的 `app/adapters/ragflow/mappers.py`，避免它在后续维护中变成误导入口。
