@@ -53,18 +53,18 @@ function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
 
 function getFriendlyHttpMessage(statusCode: number, fallbackMessage: string): string {
   if (statusCode >= 500) {
-    return '服务暂时不可用，请稍后重试。'
+    return fallbackMessage || 'Service is temporarily unavailable.'
   }
 
   if (statusCode === 404) {
-    return '目标接口不存在，请确认服务版本是否匹配。'
+    return fallbackMessage || 'The target endpoint does not exist.'
   }
 
   if (statusCode === 400) {
-    return fallbackMessage || '请求参数不合法，请检查输入内容。'
+    return fallbackMessage || 'The request parameters are invalid.'
   }
 
-  return fallbackMessage || `请求失败，状态码 ${statusCode}。`
+  return fallbackMessage || `Request failed with status ${statusCode}.`
 }
 
 async function parseErrorPayload(response: Response): Promise<string> {
@@ -111,10 +111,10 @@ export async function requestJson<TResponse>(
     }
 
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new IntegrationApiError('timeout', '请求超时，请稍后重试。')
+      throw new IntegrationApiError('timeout', 'Request timed out.')
     }
 
-    throw new IntegrationApiError('network', '网络异常，请检查服务是否启动。')
+    throw new IntegrationApiError('network', 'Network error. Check whether the service is running.')
   } finally {
     timeout.dispose()
   }
@@ -154,10 +154,10 @@ export async function requestBlob(
     }
 
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new IntegrationApiError('timeout', '请求超时，请稍后重试。')
+      throw new IntegrationApiError('timeout', 'Request timed out.')
     }
 
-    throw new IntegrationApiError('network', '网络异常，请检查服务是否启动。')
+    throw new IntegrationApiError('network', 'Network error. Check whether the service is running.')
   } finally {
     timeout.dispose()
   }
@@ -187,20 +187,22 @@ export async function openSseStream(
     }
 
     if (!response.body) {
-      throw new IntegrationApiError('invalid_response', '服务没有返回可读取的数据流。')
+      throw new IntegrationApiError('invalid_response', 'The service returned no readable stream.')
     }
 
-    return response.body.getReader()
+    const reader = response.body.getReader()
+    timeout.dispose()
+    return reader
   } catch (error: unknown) {
     if (error instanceof IntegrationApiError) {
       throw error
     }
 
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new IntegrationApiError('timeout', '连接流式接口超时，请稍后重试。')
+      throw new IntegrationApiError('timeout', 'Timed out while connecting to the stream.')
     }
 
-    throw new IntegrationApiError('network', '流式连接失败，请检查网络或服务状态。')
+    throw new IntegrationApiError('network', 'Streaming connection failed. Check network or service state.')
   } finally {
     timeout.dispose()
   }

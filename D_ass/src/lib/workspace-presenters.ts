@@ -21,7 +21,7 @@ function normalizeForMatch(value: string): string {
 }
 
 function createTimeLabel(): string {
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat('en-US', {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date())
@@ -55,7 +55,7 @@ export function toReferenceCards(references: ChatReference[]): ReferenceCard[] {
   return references.map((reference, index) => {
     return {
       key: `${reference.biz_file_id}-${index}-${reference.chunk_content}`,
-      referenceNumber: index + 1,
+      referenceNumber: reference.reference_number ?? index,
       bizFileId: reference.biz_file_id,
       bizFileName: reference.biz_file_name,
       similarityScore: reference.similarity_score,
@@ -93,15 +93,15 @@ export function toKnowledgeFileCards(
       activeReferenceCard?.bizFileId === file.bizFileId
     const isReferencedInAnswer = referenceCount > 0
 
-    let relationLabel = '未被当前回答引用'
+    let relationLabel = 'Not cited by the current answer'
     if (isActiveReferenceSource) {
-      relationLabel = `当前激活引用来源 [^${activeReferenceCard?.referenceNumber ?? ''}]`
+      relationLabel = `Active citation source [^${activeReferenceCard?.referenceNumber ?? ''}]`
     } else if (isCurrent && isReferencedInAnswer) {
-      relationLabel = `当前文件，已被引用 ${referenceCount} 次`
+      relationLabel = `Current file, cited ${referenceCount} times`
     } else if (isCurrent) {
-      relationLabel = '当前文件'
+      relationLabel = 'Current file'
     } else if (isReferencedInAnswer) {
-      relationLabel = `已被当前回答引用 ${referenceCount} 次`
+      relationLabel = `Cited ${referenceCount} times by the current answer`
     }
 
     return {
@@ -119,7 +119,7 @@ export function toKnowledgeFileCards(
       isActiveReferenceSource,
       referenceCount,
       relationLabel,
-      statsLabel: `chunks=${file.chunkCount} · tokens=${file.tokenCount} · ${file.lastUpdatedLabel}`,
+      statsLabel: `chunks=${file.chunkCount} | tokens=${file.tokenCount} | ${file.lastUpdatedLabel}`,
     }
   })
 }
@@ -132,11 +132,11 @@ export function toKnowledgeWorkspaceSummary(
 ): KnowledgeWorkspaceSummary {
   const referencedFiles = new Set(referenceCards.map((card) => card.bizFileId)).size
   const currentFileLabel = currentFile
-    ? `${currentFile.bizFileName} · ${currentFile.parseStatus}`
-    : '未选择文件'
+    ? `${currentFile.bizFileName} | ${currentFile.parseStatus}`
+    : 'No file selected'
   const activeReferenceLabel = activeReferenceCard
     ? `[^${activeReferenceCard.referenceNumber}] ${activeReferenceCard.bizFileName}`
-    : '当前无激活引用'
+    : 'No active citation'
 
   return {
     totalFiles: files.length,
@@ -145,8 +145,8 @@ export function toKnowledgeWorkspaceSummary(
     activeReferenceLabel,
     helperText:
       files.length === 0
-        ? '上传成功后的文件会进入工作区列表，并与引用区保持联动。'
-        : '当前文件、当前回答引用和右侧核对区会保持同步。',
+        ? 'Uploaded files will appear here and stay linked to citations.'
+        : 'Current file, active answer citations, and preview stay in sync.',
   }
 }
 
@@ -165,11 +165,11 @@ export function toCurrentFileSummary(
   const isActiveReferenceSource =
     activeReferenceCard?.bizFileId === currentFile.bizFileId
 
-  let relationLabel = '当前回答尚未引用该文件'
+  let relationLabel = 'Current answer has not cited this file'
   if (isActiveReferenceSource) {
-    relationLabel = `当前激活引用来自该文件 [^${activeReferenceCard?.referenceNumber ?? ''}]`
+    relationLabel = `Active citation comes from this file [^${activeReferenceCard?.referenceNumber ?? ''}]`
   } else if (referenceCount > 0) {
-    relationLabel = `当前回答已引用该文件 ${referenceCount} 次`
+    relationLabel = `Current answer cited this file ${referenceCount} times`
   }
 
   return {
@@ -178,7 +178,7 @@ export function toCurrentFileSummary(
     knowledgeBaseName: currentFile.knowledgeBaseName,
     parseStatus: currentFile.parseStatus,
     parseMessage: currentFile.parseMessage,
-    statsLabel: `chunks=${currentFile.chunkCount} · tokens=${currentFile.tokenCount}`,
+    statsLabel: `chunks=${currentFile.chunkCount} | tokens=${currentFile.tokenCount}`,
     relationLabel,
     lastUpdatedLabel: currentFile.lastUpdatedLabel,
   }
@@ -191,26 +191,26 @@ export function toUploadDraftSummary(
 ): UploadDraftSummary {
   if (isUploading) {
     return {
-      selectedFileName: selectedFileName || '正在上传',
-      helperText: '文件已提交到防腐层，正在等待上传与解析结果。',
-      readinessLabel: '上传中',
+      selectedFileName: selectedFileName || 'Uploading',
+      helperText: 'File is being sent to the integration layer.',
+      readinessLabel: 'Uploading',
     }
   }
 
   if (!selectedFileName) {
     return {
-      selectedFileName: '未选择文件',
-      helperText: '先填写知识库、业务文件 ID、业务文件名，再选择文件。',
-      readinessLabel: '待准备',
+      selectedFileName: 'No file selected',
+      helperText: 'Fill in the knowledge base, business file ID, and file name before selecting a file.',
+      readinessLabel: 'Pending',
     }
   }
 
   return {
     selectedFileName,
     helperText: canUpload
-      ? '上传条件已满足，可以将文件送入当前工作区。'
-      : '文件已选择，但上传信息还不完整。',
-    readinessLabel: canUpload ? '可上传' : '待补全',
+      ? 'Upload requirements are satisfied.'
+      : 'A file is selected, but upload details are incomplete.',
+    readinessLabel: canUpload ? 'Ready' : 'Incomplete',
   }
 }
 
@@ -228,13 +228,13 @@ export function toFileDetailPanelState(
     knowledgeBaseName: detail.knowledge_base_name,
     parseStatus: detail.parse_status,
     parseMessage: detail.parse_message,
-    statsLabel: `chunks=${detail.chunk_count} · tokens=${detail.token_count}`,
+    statsLabel: `chunks=${detail.chunk_count} | tokens=${detail.token_count}`,
     helperText:
       detail.chunks.length > 0
-        ? '以下为当前文件的 chunk 预览，可结合右侧激活引用进行人工核对。'
+        ? 'Chunk preview for the current file.'
         : detail.parse_message
-          ? '当前文件尚未返回可展示的 chunk 预览，请先处理下方解析失败信息。'
-          : '当前文件尚未返回可展示的 chunk 预览。',
+          ? 'No chunk preview is available. Review the parse failure details.'
+          : 'No chunk preview is available yet.',
     chunks: detail.chunks.map((chunk) => {
       const normalizedChunkContent = normalizeForMatch(chunk.content)
       const isMatchedToActiveReference =

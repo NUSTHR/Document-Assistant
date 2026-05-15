@@ -1,6 +1,6 @@
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
 const DEFAULT_STREAM_CONNECT_TIMEOUT_MS = 15_000
-const DEFAULT_BASE_URL = 'http://localhost:8081'
+const DEFAULT_BASE_URL = ''
 
 function readPositiveNumber(
   rawValue: string | undefined,

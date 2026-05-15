@@ -16,8 +16,8 @@ import { useFileDetailPreview } from './useFileDetailPreview'
 import { useKnowledgeFiles } from './useKnowledgeFiles'
 import { useReferenceViewer } from './useReferenceViewer'
 
-const EMPTY_HEALTH_STATUS = '未检测'
-const HEALTH_FAILURE_STATUS = '失败'
+const EMPTY_HEALTH_STATUS = 'Unchecked'
+const HEALTH_FAILURE_STATUS = 'Failed'
 
 export function useRagWorkspace() {
   const knowledgeFiles = useKnowledgeFiles()
@@ -110,7 +110,7 @@ export function useRagWorkspace() {
       healthStatus.value = response.status
     } catch (error: unknown) {
       healthStatus.value = HEALTH_FAILURE_STATUS
-      healthErrorMessage.value = toFriendlyMessage(error, '健康检查失败。')
+      healthErrorMessage.value = toFriendlyMessage(error, 'Health check failed.')
     }
   }
 
@@ -123,14 +123,17 @@ export function useRagWorkspace() {
     activeReferenceNumber: referenceViewer.activeReferenceNumber,
     answerSegments,
     answerStatus: chatSession.answerStatus,
+    assistantChatId: chatSession.assistantChatId,
     assistantName: chatSession.assistantName,
     bizFileId: knowledgeFiles.bizFileId,
     bizFileName: knowledgeFiles.bizFileName,
     canSubmitChat: chatSession.canSubmitChat,
     canUploadFile: knowledgeFiles.canUploadFile,
     cancelChat: chatSession.cancelChat,
+    chatErrorCode: chatSession.errorCode,
     chatErrorMessage: chatSession.errorMessage,
     checkHealth,
+    clearTransientAnswer: chatSession.clearTransientAnswer,
     currentFile: knowledgeFiles.currentFile,
     currentFileAssetPreview: fileAssetPreview.assetPreview,
     currentFileDetail: fileDetailPreview.fileDetail,
@@ -155,9 +158,12 @@ export function useRagWorkspace() {
     pageErrorMessage,
     question: chatSession.question,
     referenceCards,
+    resetChat: chatSession.resetChat,
     selectedFile: knowledgeFiles.selectedFile,
     selectKnowledgeFile: knowledgeFiles.selectKnowledgeFile,
+    sessionId: chatSession.sessionId,
     sessionName: chatSession.sessionName,
+    submittedQuestion: chatSession.submittedQuestion,
     streamedAnswer: chatSession.streamedAnswer,
     submitChat: chatSession.submitChat,
     submitUpload: knowledgeFiles.submitUpload,

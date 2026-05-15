@@ -12,7 +12,7 @@ import {
 import type { KnowledgeFileItem } from '../types/workspace'
 
 export function useKnowledgeFiles() {
-  const knowledgeBaseName = ref<string>('')
+  const knowledgeBaseName = ref<string>('Standard collection')
   const bizFileId = ref<string>('')
   const bizFileName = ref<string>('')
   const selectedFile = ref<File | null>(null)
@@ -65,7 +65,7 @@ export function useKnowledgeFiles() {
   async function loadFiles(): Promise<void> {
     const trimmedKnowledgeBaseName = knowledgeBaseName.value.trim()
     if (!trimmedKnowledgeBaseName) {
-      errorMessage.value = '请先填写知识库名称。'
+      errorMessage.value = 'Please enter a knowledge base name.'
       return
     }
 
@@ -85,7 +85,7 @@ export function useKnowledgeFiles() {
         currentFileBizId.value = files.value[0]?.bizFileId ?? null
       }
     } catch (error: unknown) {
-      errorMessage.value = toFriendlyMessage(error, '文件列表加载失败。')
+      errorMessage.value = toFriendlyMessage(error, 'Failed to load file list.')
     } finally {
       isLoadingFiles.value = false
     }
@@ -93,7 +93,7 @@ export function useKnowledgeFiles() {
 
   async function submitUpload(): Promise<void> {
     if (!canUploadFile.value || selectedFile.value === null) {
-      errorMessage.value = '请先完整填写上传信息。'
+      errorMessage.value = 'Please complete the upload details first.'
       return
     }
 
@@ -116,7 +116,7 @@ export function useKnowledgeFiles() {
       currentFileBizId.value = nextFile.bizFileId
       shouldRefreshFiles = true
     } catch (error: unknown) {
-      errorMessage.value = toFriendlyMessage(error, '文件上传失败。')
+      errorMessage.value = toFriendlyMessage(error, 'File upload failed.')
     } finally {
       isUploadingFile.value = false
     }

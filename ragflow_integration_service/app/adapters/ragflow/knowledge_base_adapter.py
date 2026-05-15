@@ -1,14 +1,11 @@
 import mimetypes
-
-from ragflow_sdk import RAGFlow
-from ragflow_sdk.modules.dataset import DataSet
-from ragflow_sdk.modules.chunk import Chunk
-from ragflow_sdk.modules.document import Document
+from typing import Any
 
 from app.adapters.ragflow.anti_corruption import (
     embed_biz_file_id,
     extract_biz_metadata,
 )
+from app.adapters.ragflow.client import RagflowHttpClient
 from app.adapters.ragflow.exceptions import RagflowIntegrationError
 from app.core.constants import FILE_DETAIL_PREVIEW_CHUNK_LIMIT, UNKNOWN_PARSE_STATUS
 from app.dto.commands import UploadKnowledgeFileCommand
@@ -22,7 +19,7 @@ from app.ports.knowledge_base import KnowledgeBasePort
 
 
 class RagflowKnowledgeBaseAdapter(KnowledgeBasePort):
-    def __init__(self, client: RAGFlow) -> None:
+    def __init__(self, client: RagflowHttpClient) -> None:
         self._client = client
 
     def upload_and_parse(
@@ -30,38 +27,35 @@ class RagflowKnowledgeBaseAdapter(KnowledgeBasePort):
     ) -> FileIngestionResult:
         try:
             dataset = self._get_or_create_dataset(command.knowledge_base_name)
+            dataset_id = str(dataset.get("id") or "")
             embedded_name = embed_biz_file_id(
                 command.biz_file_id,
                 command.biz_file_name,
             )
-            uploaded_documents = dataset.upload_documents(
-                [{"display_name": embedded_name, "blob": command.content}]
+            upload_payload = self._client.upload(
+                f"/datasets/{dataset_id}/documents",
+                files=[("file", embedded_name, command.content)],
             )
+            uploaded_documents = self._read_items(upload_payload, "documents")
             if not uploaded_documents:
                 raise RagflowIntegrationError("ragflow returned no uploaded document")
 
             uploaded_document = uploaded_documents[0]
-            dataset.parse_documents([uploaded_document.id])
-
+            document_id = str(uploaded_document.get("id") or "")
+            self._client.post(
+                f"/datasets/{dataset_id}/chunks",
+                json_body={"document_ids": [document_id]},
+            )
             refreshed_document = self._require_document(
-                dataset=dataset,
-                document_id=uploaded_document.id,
+                dataset_id=dataset_id,
+                document_id=document_id,
             )
-            biz_file_id, biz_file_name = extract_biz_metadata(refreshed_document.name)
-            parse_status = (
-                refreshed_document.run
-                or refreshed_document.status
-                or UNKNOWN_PARSE_STATUS
-            )
-            return FileIngestionResult(
+            return self._to_file_ingestion_result(
                 knowledge_base_name=command.knowledge_base_name,
-                biz_file_id=biz_file_id,
-                biz_file_name=biz_file_name,
-                parse_status=str(parse_status),
-                parse_message=self._extract_parse_message(refreshed_document),
-                chunk_count=int(getattr(refreshed_document, "chunk_count", 0) or 0),
-                token_count=int(getattr(refreshed_document, "token_count", 0) or 0),
+                document=refreshed_document,
             )
+        except RagflowIntegrationError:
+            raise
         except Exception as exc:
             raise RagflowIntegrationError("failed to upload and parse document") from exc
 
@@ -71,18 +65,22 @@ class RagflowKnowledgeBaseAdapter(KnowledgeBasePort):
             if dataset is None:
                 return []
 
-            documents: list[Document] = []
+            documents: list[dict[str, Any]] = []
             page = 1
             page_size = 100
-
             while True:
-                current_page_documents = dataset.list_documents(
-                    page=page,
-                    page_size=page_size,
+                payload = self._client.get(
+                    f"/datasets/{dataset['id']}/documents",
+                    params={
+                        "page": page,
+                        "page_size": page_size,
+                        "orderby": "create_time",
+                        "desc": True,
+                    },
                 )
+                current_page_documents = self._read_items(payload, "docs")
                 if not current_page_documents:
                     break
-
                 documents.extend(current_page_documents)
                 if len(current_page_documents) < page_size:
                     break
@@ -95,6 +93,8 @@ class RagflowKnowledgeBaseAdapter(KnowledgeBasePort):
                 )
                 for document in documents
             ]
+        except RagflowIntegrationError:
+            raise
         except Exception as exc:
             raise RagflowIntegrationError("failed to list knowledge base files") from exc
 
@@ -106,19 +106,28 @@ class RagflowKnowledgeBaseAdapter(KnowledgeBasePort):
             if dataset is None:
                 return None
 
-            document = self._find_document_by_biz_file_id(dataset, biz_file_id)
+            document = self._find_document_by_biz_file_id(
+                dataset_id=str(dataset.get("id") or ""),
+                biz_file_id=biz_file_id,
+            )
             if document is None:
                 return None
 
-            chunks = document.list_chunks(
-                page=1,
-                page_size=FILE_DETAIL_PREVIEW_CHUNK_LIMIT,
+            chunks_payload = self._client.get(
+                f"/datasets/{dataset['id']}/documents/{document['id']}/chunks",
+                params={
+                    "page": 1,
+                    "page_size": FILE_DETAIL_PREVIEW_CHUNK_LIMIT,
+                },
             )
+            chunks = self._read_items(chunks_payload, "chunks")
             return self._to_file_detail_result(
                 knowledge_base_name=knowledge_base_name,
                 document=document,
                 chunks=chunks,
             )
+        except RagflowIntegrationError:
+            raise
         except Exception as exc:
             raise RagflowIntegrationError("failed to get knowledge file detail") from exc
 
@@ -130,12 +139,17 @@ class RagflowKnowledgeBaseAdapter(KnowledgeBasePort):
             if dataset is None:
                 return None
 
-            document = self._find_document_by_biz_file_id(dataset, biz_file_id)
+            document = self._find_document_by_biz_file_id(
+                dataset_id=str(dataset.get("id") or ""),
+                biz_file_id=biz_file_id,
+            )
             if document is None:
                 return None
 
-            _, biz_file_name = extract_biz_metadata(document.name)
-            file_content = document.download()
+            _, biz_file_name = extract_biz_metadata(str(document.get("name") or ""))
+            file_content = self._client.download(
+                f"/datasets/{dataset['id']}/documents/{document['id']}"
+            )
             media_type = (
                 mimetypes.guess_type(biz_file_name)[0] or "application/octet-stream"
             )
@@ -146,50 +160,81 @@ class RagflowKnowledgeBaseAdapter(KnowledgeBasePort):
                 media_type=media_type,
                 content=file_content,
             )
+        except RagflowIntegrationError:
+            raise
         except Exception as exc:
             raise RagflowIntegrationError("failed to get knowledge file content") from exc
 
-    def _get_or_create_dataset(self, knowledge_base_name: str) -> DataSet:
+    def _get_or_create_dataset(self, knowledge_base_name: str) -> dict[str, Any]:
         dataset = self._find_dataset(knowledge_base_name)
         if dataset is not None:
             return dataset
-        return self._client.create_dataset(name=knowledge_base_name)
+        payload = self._client.post(
+            "/datasets",
+            json_body={"name": knowledge_base_name},
+        )
+        dataset_data = payload.get("data")
+        if not isinstance(dataset_data, dict):
+            raise RagflowIntegrationError("ragflow returned no created dataset")
+        return dataset_data
 
-    def _find_dataset(self, knowledge_base_name: str) -> DataSet | None:
-        try:
-            datasets = self._client.list_datasets(name=knowledge_base_name)
-        except Exception as exc:
-            error_message = str(exc)
-            if (
-                "lacks permission for dataset" in error_message
-                or "not found" in error_message.lower()
-            ):
-                return None
-            raise
-
+    def _find_dataset(self, knowledge_base_name: str) -> dict[str, Any] | None:
+        payload = self._client.get(
+            "/datasets",
+            params={
+                "page": 1,
+                "page_size": 100,
+                "name": knowledge_base_name,
+            },
+        )
+        datasets = self._read_items(payload, "datasets")
         if not datasets:
             return None
         return datasets[0]
 
-    def _require_document(self, dataset: DataSet, document_id: str) -> Document:
-        documents = dataset.list_documents(id=document_id)
+    def _require_document(
+        self,
+        dataset_id: str,
+        document_id: str,
+    ) -> dict[str, Any]:
+        payload = self._client.get(
+            f"/datasets/{dataset_id}/documents",
+            params={
+                "page": 1,
+                "page_size": 1,
+                "id": document_id,
+            },
+        )
+        documents = self._read_items(payload, "docs")
         if not documents:
             raise RagflowIntegrationError("uploaded document not found after parsing")
         return documents[0]
 
     def _find_document_by_biz_file_id(
-        self, dataset: DataSet, biz_file_id: str
-    ) -> Document | None:
+        self,
+        dataset_id: str,
+        biz_file_id: str,
+    ) -> dict[str, Any] | None:
         page = 1
         page_size = 100
-
         while True:
-            documents = dataset.list_documents(page=page, page_size=page_size)
+            payload = self._client.get(
+                f"/datasets/{dataset_id}/documents",
+                params={
+                    "page": page,
+                    "page_size": page_size,
+                    "orderby": "create_time",
+                    "desc": True,
+                },
+            )
+            documents = self._read_items(payload, "docs")
             if not documents:
                 return None
 
             for document in documents:
-                matched_biz_file_id, _ = extract_biz_metadata(document.name)
+                matched_biz_file_id, _ = extract_biz_metadata(
+                    str(document.get("name") or "")
+                )
                 if matched_biz_file_id == biz_file_id:
                     return document
 
@@ -198,52 +243,67 @@ class RagflowKnowledgeBaseAdapter(KnowledgeBasePort):
             page += 1
 
     def _to_file_ingestion_result(
-        self, knowledge_base_name: str, document: Document
+        self,
+        knowledge_base_name: str,
+        document: dict[str, Any],
     ) -> FileIngestionResult:
-        biz_file_id, biz_file_name = extract_biz_metadata(document.name)
-        parse_status = document.run or document.status or UNKNOWN_PARSE_STATUS
+        biz_file_id, biz_file_name = extract_biz_metadata(str(document.get("name") or ""))
+        parse_status = (
+            document.get("run")
+            or document.get("status")
+            or document.get("parser_status")
+            or UNKNOWN_PARSE_STATUS
+        )
         return FileIngestionResult(
             knowledge_base_name=knowledge_base_name,
             biz_file_id=biz_file_id,
             biz_file_name=biz_file_name,
             parse_status=str(parse_status),
             parse_message=self._extract_parse_message(document),
-            chunk_count=int(getattr(document, "chunk_count", 0) or 0),
-            token_count=int(getattr(document, "token_count", 0) or 0),
+            chunk_count=int(document.get("chunk_count") or 0),
+            token_count=int(document.get("token_count") or 0),
         )
 
     def _to_file_detail_result(
         self,
         knowledge_base_name: str,
-        document: Document,
-        chunks: list[Chunk],
+        document: dict[str, Any],
+        chunks: list[dict[str, Any]],
     ) -> KnowledgeFileDetailResult:
-        biz_file_id, biz_file_name = extract_biz_metadata(document.name)
-        parse_status = document.run or document.status or UNKNOWN_PARSE_STATUS
+        ingestion_result = self._to_file_ingestion_result(
+            knowledge_base_name=knowledge_base_name,
+            document=document,
+        )
         return KnowledgeFileDetailResult(
             knowledge_base_name=knowledge_base_name,
-            biz_file_id=biz_file_id,
-            biz_file_name=biz_file_name,
-            parse_status=str(parse_status),
-            parse_message=self._extract_parse_message(document),
-            chunk_count=int(getattr(document, "chunk_count", 0) or 0),
-            token_count=int(getattr(document, "token_count", 0) or 0),
+            biz_file_id=ingestion_result.biz_file_id,
+            biz_file_name=ingestion_result.biz_file_name,
+            parse_status=ingestion_result.parse_status,
+            parse_message=ingestion_result.parse_message,
+            chunk_count=ingestion_result.chunk_count,
+            token_count=ingestion_result.token_count,
             chunks=[
                 FileChunkPreviewResult(
                     sequence=index + 1,
-                    content=str(getattr(chunk, "content", "")),
+                    content=str(chunk.get("content") or chunk.get("content_with_weight") or ""),
                 )
                 for index, chunk in enumerate(chunks)
             ],
         )
 
-    def _extract_parse_message(self, document: Document) -> str | None:
-        raw_message = getattr(document, "progress_msg", None)
+    def _read_items(self, payload: dict[str, Any], collection_key: str) -> list[dict[str, Any]]:
+        data = payload.get("data")
+        if isinstance(data, dict):
+            items = data.get(collection_key, [])
+        elif isinstance(data, list):
+            items = data
+        else:
+            items = []
+        return [item for item in items if isinstance(item, dict)]
+
+    def _extract_parse_message(self, document: dict[str, Any]) -> str | None:
+        raw_message = document.get("progress_msg") or document.get("process_msg")
         if raw_message is None:
             return None
-
         normalized_message = str(raw_message).strip()
-        if not normalized_message:
-            return None
-
-        return normalized_message
+        return normalized_message or None

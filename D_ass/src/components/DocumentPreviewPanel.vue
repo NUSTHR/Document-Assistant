@@ -22,6 +22,17 @@ const emit = defineEmits<{
   (event: 'load-asset-preview'): void
   (event: 'reload-detail'): void
 }>()
+
+const PREVIEW_TEXT_LIMIT = 400
+
+function truncatePreviewText(value: string): string {
+  const normalizedValue = value.replace(/\s+/g, ' ').trim()
+  if (normalizedValue.length <= PREVIEW_TEXT_LIMIT) {
+    return normalizedValue
+  }
+
+  return `${normalizedValue.slice(0, PREVIEW_TEXT_LIMIT).trim()}...`
+}
 </script>
 
 <template>
@@ -81,7 +92,7 @@ const emit = defineEmits<{
           <span>biz_file_id={{ activeReferenceCard.bizFileId }}</span>
           <span>score {{ activeReferenceCard.similarityLabel }}</span>
         </div>
-        <p class="preview-block__content">{{ activeReferenceCard.chunkContent }}</p>
+        <p class="preview-block__content">{{ truncatePreviewText(activeReferenceCard.chunkContent) }}</p>
       </div>
 
       <div v-if="isLoadingAssetPreview" class="preview-loading">
@@ -127,7 +138,7 @@ const emit = defineEmits<{
         />
 
         <div v-else-if="currentFileAssetPreview.mode === 'text'" class="asset-preview-text">
-          <pre>{{ currentFileAssetPreview.textContent }}</pre>
+          <pre>{{ truncatePreviewText(currentFileAssetPreview.textContent) }}</pre>
           <p v-if="currentFileAssetPreview.isTextTruncated" class="preview-block__meta">
             文本预览已截断，仅展示前 200 KB 内容。
           </p>
@@ -178,7 +189,7 @@ const emit = defineEmits<{
               <strong>{{ chunk.previewLabel }}</strong>
               <span v-if="chunk.isMatchedToActiveReference">匹配当前引用</span>
             </div>
-            <p class="preview-chunk-card__content">{{ chunk.content }}</p>
+            <p class="preview-chunk-card__content">{{ truncatePreviewText(chunk.content) }}</p>
           </article>
         </div>
       </div>

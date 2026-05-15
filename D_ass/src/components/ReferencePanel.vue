@@ -9,6 +9,17 @@ defineProps<{
 const emit = defineEmits<{
   (event: 'select-reference', referenceNumber: number): void
 }>()
+
+const PREVIEW_TEXT_LIMIT = 400
+
+function truncatePreviewText(value: string): string {
+  const normalizedValue = value.replace(/\s+/g, ' ').trim()
+  if (normalizedValue.length <= PREVIEW_TEXT_LIMIT) {
+    return normalizedValue
+  }
+
+  return `${normalizedValue.slice(0, PREVIEW_TEXT_LIMIT).trim()}...`
+}
 </script>
 
 <template>
@@ -43,7 +54,7 @@ const emit = defineEmits<{
         <strong>{{ reference.bizFileName }}</strong>
         <span class="reference-card__score">score {{ reference.similarityLabel }}</span>
         <p class="reference-card__meta">biz_file_id={{ reference.bizFileId }}</p>
-        <p class="reference-card__content">{{ reference.chunkContent }}</p>
+        <p class="reference-card__content">{{ truncatePreviewText(reference.chunkContent) }}</p>
       </button>
     </div>
   </article>

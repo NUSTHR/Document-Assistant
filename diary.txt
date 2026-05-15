@@ -932,3 +932,461 @@
    - 重新安装 `pyproject.toml` 依赖
    - 再跑 `compileall`、`import app.main` 和真实 `/health`、`/api/files`、`/api/chat` 验证
 6. 代码清理层面，建议后续删除或修复未使用且已失效的 `app/adapters/ragflow/mappers.py`，避免它在后续维护中变成误导入口。
+---
+
+更新时间：2026-05-12  本轮前端严格复刻、RAGFlow 会话存储与配置联调结论
+
+十九、这轮按用户最新 HTML 重新收束前端
+1. 已将 `D_ass/src/App.vue` 的主界面改成用户最后提供的 HTML 结构与视觉层级：
+   - Mobile Top Bar
+   - 固定 260px 左侧 Sidebar
+   - New Chat 按钮
+   - Chat Sessions 列表
+   - 底部 Knowledge Base、Settings、用户信息区域
+   - Source Citations 40% 引用列
+   - AI Response Pane 60% 对话列
+   - 顶部引用栏折叠按钮
+   - 模型下拉
+   - 静态示例消息与 typing indicator
+   - 底部输入框
+   - Mobile Navigation Bar
+2. 为了不依赖 Tailwind CDN 是否可用，保留用户给出的 Tailwind class 结构，同时在 `D_ass/src/style.css` 中补了本地兜底样式。
+3. `D_ass/index.html` 已补入用户示例中的 Tailwind CDN、Alpine CDN、Inter/Geist/Material Symbols 字体和 Tailwind token 配置。
+4. 前端仍然使用 Vue 实现交互，没有让 Alpine 接管状态；这能保留工程化组件状态，同时视觉结构尽量贴合用户给出的代码。
+
+二十、RAGFlow 会话存储结论
+1. 聊天 session 可以直接使用 RAGFlow 的存储。
+2. 本轮已新增后端接口：
+   - `GET /api/ragflow/chats/{chat_id}/sessions`
+   - `POST /api/ragflow/chats/{chat_id}/sessions`
+3. 前端 sidebar 的 Chat Sessions 现在优先从 RAGFlow session 列表读取。
+4. New Chat 会调用 RAGFlow 创建真实 session，不再只是前端本地 reset。
+5. 发送聊天请求时，前端会带上 `session_id`；后端会优先复用这个 RAGFlow session。
+6. 如果没有 `session_id`，后端会按 `session_name` 查询已有 RAGFlow session，找不到才创建新 session。
+7. 用户信息目前没有接入 RAGFlow：当前 ragflow-sdk 和已知 API 中没有明确的“当前用户 profile”读取接口，所以界面里的 `Alex Sterling / Enterprise Plan` 仍按用户给定 HTML 保持静态。若后续确认 RAGFlow 有用户资料 API，再替换为真实数据。
+
+二十一、RAGFlow 配置参数链路
+1. 已新增并验证后端配置接口：
+   - `GET /api/ragflow/config`
+   - `PUT /api/ragflow/chats/config`
+2. 前端 Settings 弹窗可以直接修改当前 RAGFlow assistant 的配置参数：
+   - assistant
+   - dataset_ids
+   - LLM model ID
+   - similarity_threshold
+   - vector_similarity_weight
+   - top_k
+   - top_n
+   - rerank_id
+   - quote
+   - system prompt
+   - empty_response
+3. Knowledge Base 弹窗展示并选择 RAGFlow datasets，保存后写回 RAGFlow chat 配置。
+
+二十二、本轮修复的问题
+1. 修复了聊天适配器每次提问都会 `create_session` 的问题，改成复用 RAGFlow session。
+2. 修复了 ragflow-sdk `chat.list_sessions(id=...)` 在当前 RAGFlow 环境下不稳定的问题：后端改为直接调用 REST endpoint `/chats/{chat_id}/sessions`，再在本地按 id/name 过滤。
+3. 修复了 SSE answer 合并逻辑：RAGFlow 某些事件会返回累计 answer，不能一律拼接，否则会重复输出。
+4. 修复了前端多个 TypeScript 文件中的乱码提示文案和潜在语法问题。
+5. `ChatRequest` 前后端类型已补 `session_id`，前端可以指定 RAGFlow session 对话。
+
+二十三、真实测试结果
+1. 前端构建通过：
+   - `npm.cmd run build`
+   - `vue-tsc -b` 通过
+   - `vite build` 通过
+2. 后端编译和导入通过：
+   - `.venv\Scripts\python -m compileall app`
+   - `.venv\Scripts\python -c "import app.main; print('backend import ok')"`
+3. 临时后端 `http://127.0.0.1:8091` 验证通过：
+   - `GET /api/ragflow/config` 返回 RAGFlow datasets/chats
+   - `GET /api/ragflow/chats/fbc2d4e84dd411f1bd3f8964e3084cbf/sessions` 返回 RAGFlow sessions/messages
+   - `POST /api/ragflow/chats/fbc2d4e84dd411f1bd3f8964e3084cbf/sessions` 成功创建 `Recent Chat API Test`
+   - `PUT /api/ragflow/chats/config` 成功保存 `Standard Assistant` 配置
+   - `POST /api/chat` 能进入指定 RAGFlow session，并返回引用 chunks
+4. 当前真实聊天最终仍返回：
+   - `MODEL_ERROR - Model disabled`
+   这说明链路已打到 RAGFlow 和模型调用层，但 RAGFlow 当前配置的 `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B@SILICONFLOW` 在模型服务端被禁用。
+5. 即使模型禁用，RAGFlow 仍返回了 retrieval references，前端 Source Citations 可以接收并展示真实引用来源。
+6. 本轮启动过前端 dev server：
+   - `http://127.0.0.1:5173`
+   - 使用环境变量指向临时后端 `http://127.0.0.1:8091`
+7. Codex 内置浏览器自动化通道两次超时，未能完成截图级验证；但页面 HTTP 访问返回 200，构建和接口级用户路径测试均通过。
+
+二十四、当前状态判断
+1. 用户要求的“严格复刻最新 HTML 设计”已经在主界面结构上完成，并保留用户示例的静态首屏情景。
+2. RAGFlow session 已经成为聊天 session 的真实存储来源。
+3. RAGFlow assistant/dataset/检索参数配置已经可以从前端触达后端并写回 RAGFlow。
+4. 当前不能生成正常模型回答的根因是 RAGFlow 模型配置中的模型被禁用，不是前端、session、引用或 integration-service 链路未打通。
+---
+
+Update: 2026-05-13 backend anti-corruption compliance and end-to-end check
+
+1. The backend integration service has been refactored to satisfy the latest architecture constraint: `ragflow_integration_service` now calls RAGFlow through official HTTP APIs only. Runtime source no longer imports `ragflow_sdk` or any RAGFlow internal module.
+2. RAGFlow HTTP access is centralized under `app/adapters/ragflow/`:
+   - `client.py` owns base URL normalization, auth headers, JSON requests, multipart upload, downloads, and SSE streaming.
+   - `conversation_adapter.py` calls chat/session/completion HTTP endpoints and maps streamed chunks to project DTOs.
+   - `knowledge_base_adapter.py` calls dataset/document/chunk HTTP endpoints and keeps parsing/retrieval/storage inside RAGFlow.
+   - `config_adapter.py` exposes frontend-safe assistant/dataset/session configuration DTOs.
+   - `identity.py` maps RAGFlow physical IDs to stable opaque business IDs using HMAC. Raw `dataset_id`, `document_id`, `chat_id`, and `session_id` are not returned by public API schemas.
+3. Public API and frontend types now use business DTO fields:
+   - `biz_knowledge_base_id`
+   - `biz_chat_id`
+   - `biz_session_id`
+   - existing file-level `biz_file_id`
+4. Frontend calls still go only through the integration service:
+   - `/api/ragflow/config`
+   - `/api/ragflow/chats/{biz_chat_id}/sessions`
+   - `/api/ragflow/chats/config`
+   - `/api/chat`
+   No frontend code uses `RAGFLOW_BASE_URL` or `/api/v1` directly.
+5. Verified commands:
+   - `.venv\Scripts\python -m compileall app`
+   - `.venv\Scripts\python -c "import app.main; print('backend import ok')"`
+   - `npm.cmd run build`
+6. Verified real user API flow against the local RAGFlow deployment:
+   - `GET http://127.0.0.1:8081/health` returned `ok`.
+   - `GET /api/ragflow/config` returned one dataset and one assistant using only business IDs.
+   - `GET /api/ragflow/chats/{biz_chat_id}/sessions` returned RAGFlow-backed sessions and sanitized messages.
+   - `PUT /api/ragflow/chats/config` succeeded by writing the current assistant configuration back with unchanged values.
+   - `POST /api/chat` succeeded with streaming answer chunks and final citation chunks. Inline RAGFlow markers were converted to `[^n]`.
+   - `GET /api/files?knowledge_base_name=Standard%20collection` returned existing documents through project DTOs.
+7. Current RAGFlow data note: older documents were not uploaded through this project's `[biz_id:...]` naming convention, so their returned citation/file `biz_file_id` safely degrades to `UNKNOWN`. This is expected and prevents leaking RAGFlow physical document IDs.
+8. Frontend status:
+   - The main chat UI remains aligned with the provided HTML structure and styling.
+   - Settings writes RAGFlow assistant parameters through the backend anti-corruption layer.
+   - Chat sessions are loaded from RAGFlow through the backend layer.
+   - The local frontend dev server is available at `http://127.0.0.1:5173`.
+9. Browser/open status:
+   - The system browser was opened to `http://127.0.0.1:5173`.
+   - Codex in-app browser automation timed out twice while attaching, but HTTP checks confirmed the frontend entry page and backend endpoints are reachable.
+10. Important engineering note: generated files such as `__pycache__` and previous build artifacts already exist in the repo and were touched by compile/build verification. They should ideally be removed from version control in a separate cleanup commit if the project policy allows it.
+
+---
+
+Update: 2026-05-13 chat UI interaction fixes and RAGFlow HTTP reuse check
+
+1. Backend compliance remains aligned with the anti-corruption-layer rule: frontend calls only `ragflow_integration_service`, and the service calls RAGFlow through HTTP APIs using `RAGFLOW_BASE_URL`.
+2. Added backend HTTP/Pydantic endpoints for frontend session operations:
+   - `GET /api/ragflow/models`
+   - `PUT /api/ragflow/chats/{biz_chat_id}/sessions/{biz_session_id}`
+   - `DELETE /api/ragflow/chats/{biz_chat_id}/sessions/{biz_session_id}`
+3. RAGFlow session rename was verified through HTTP. The local RAGFlow deployment returns a server error for `PUT /api/v1/chats/{chat_id}/sessions/{session_id}`, but `PATCH /api/v1/chats/{chat_id}/sessions/{session_id}` works. The backend public route remains `PUT`, while the adapter uses `PATCH` internally to stay compatible with this deployment.
+4. RAGFlow session deletion was verified through `DELETE /api/v1/chats/{chat_id}/sessions` with a temporary session. Temporary test sessions were deleted after verification.
+5. RAGFlow citations are now reused from official chat/session HTTP responses:
+   - live chat still uses streamed `reference.chunks`
+   - historical sessions now sanitize message-level `reference.chunks` into frontend DTO `references`
+   - public responses do not expose raw `dataset_id`, `document_id`, `chat_id`, or `session_id`
+6. RAGFlow does not expose a confirmed public HTTP endpoint for all globally available LLM models in the current tested deployment. The new model endpoint therefore returns model IDs discoverable from existing RAGFlow assistant chat configuration, labeled with source `chat_config`. No internal RAGFlow source code or database was read.
+7. Frontend fixes completed:
+   - chat transcript container has `min-h-0` and a dedicated scroll area, so it can scroll vertically
+   - sending a message clears the input immediately after the question is captured
+   - transcript auto-scrolls to the newest message while streaming/loading history
+   - session three-dot menu now supports Pin, Rename, and Delete
+   - Pin is stored locally in browser storage because RAGFlow has no verified public pin endpoint
+   - Rename/Delete use the backend anti-corruption layer and operate on RAGFlow sessions
+   - Source Citations uses real RAGFlow references when live or historical references exist, with static example cards only as the empty/default replica state
+   - the header model control is now a compact icon dropdown and no longer displays the current model name inline
+   - layout was tightened with `min-h-0`/`min-w-0` so the two-column replica does not deform under flex overflow
+8. Verified commands:
+   - `npm.cmd run build`
+   - `.venv\Scripts\python -m compileall app`
+   - `.venv\Scripts\python -c "import app.main; print('backend import ok')"`
+9. Verified backend API flow on `http://127.0.0.1:8081`:
+   - health check returned `ok`
+   - model list returned one configured model: `deepseek-ai/DeepSeek-R1@SILICONFLOW`
+   - session list returned business IDs only
+   - historical session reference DTOs were found with 8 sanitized citation chunks
+   - temporary session create, rename, and delete all succeeded through project APIs
+   - response JSON did not contain raw RAGFlow physical ID fields
+10. Frontend server was restarted and is available at `http://127.0.0.1:5173`. The system browser was opened to this URL for visual inspection. Codex in-app browser automation timed out twice while attaching, so final browser-click verification was replaced by API-level user-flow checks and build/type verification.
+
+---
+
+Update: 2026-05-13 interaction QA fixes for chat sessions and long answers
+
+1. Fixed the left session list behavior:
+   - Placeholder/static sessions now provide visible selection feedback instead of appearing dead.
+   - Real RAGFlow-backed sessions clear the placeholder active state when loaded.
+   - The three-dot session menu is no longer disabled for placeholder rows.
+   - Pin/Rename/Delete are visible from the three-dot menu in both fallback and real states.
+2. Replaced browser-native `prompt`/`confirm` dialogs with in-app dialog panels that match the existing `dialog-*` visual system.
+3. Fixed long answer overlap:
+   - The chat input area is now part of the flex layout instead of being absolutely positioned over the transcript.
+   - The transcript scroll area no longer needs large fake bottom padding to avoid being covered.
+4. Added assistant-message action buttons:
+   - Copy
+   - Regenerate
+5. Added Think presentation handling:
+   - `<think>...</think>` content is split from the visible answer.
+   - The Think section is shown behind a compact collapsible control.
+   - While streaming and only thinking content is available, the answer area shows a `Thinking...` state.
+6. Verified frontend source and dev-server output no longer contain:
+   - `window.prompt`
+   - `window.confirm`
+   - disabled session menu binding for placeholder rows
+   - absolute bottom chat input placement
+7. Verified commands and endpoints:
+   - `npm.cmd run build`
+   - `.venv\Scripts\python -m compileall app`
+   - `GET /health`
+   - `GET /api/ragflow/models`
+   - `GET /api/ragflow/config`
+   - `GET /api/ragflow/chats/{biz_chat_id}/sessions`
+   - temporary session create, rename, and delete
+   - `POST /api/chat` SSE stream returned answer/references and confirmed that current model output includes think-like content
+8. Cleanup:
+   - Removed one leftover temporary test session named `UI Flow Test 111546` through the project API.
+9. Browser automation note:
+   - Codex in-app browser automation still timed out while attaching.
+   - A temporary Chrome debugging attempt also failed to expose the debugging port in this environment.
+   - The system browser was opened to the current dev URL, while automated verification was completed through build checks, served source checks, and real backend API/user-flow checks.
+
+---
+
+Update: 2026-05-13 small chat UI polish
+
+1. Fixed duplicate assistant output widgets during streaming:
+   - The typing indicator now appears only before any streamed answer block is visible.
+   - Once the answer block exists, the UI uses that single assistant block for streaming/thinking/output.
+2. Frontend document/citation previews are now capped at about 400 characters:
+   - source citation cards in the replica UI
+   - active citation preview
+   - original text preview
+   - chunk preview cards
+   - legacy reference panel cards
+3. Copy and Regenerate buttons were reduced to compact icon-only controls.
+4. Copy/Regenerate no longer emit text messages such as `Answer copied.`; the clicked icon gets a brief visual flash instead.
+5. Verified:
+   - `npm.cmd run build`
+   - `GET /health`
+   - source check confirmed no `chatActionMessage`, `Answer copied`, or `Copy failed` strings remain.
+6. Frontend dev server was restarted and the browser was opened again at `http://127.0.0.1:5173`.
+
+---
+
+Update: 2026-05-13 frontend state-flow hardening
+
+1. Removed the remaining static/placeholder session fallback from `D_ass/src/App.vue`.
+   - The left session list is now driven only by RAGFlow-backed sessions returned through `ragflow_integration_service`.
+   - When all real sessions are deleted, the list stays empty and shows `No chat sessions` instead of recreating `Recent Chat ...`.
+   - `New Chat` still creates a real RAGFlow session through the backend anti-corruption layer.
+2. Tightened chat answer state flow.
+   - After a streamed answer is persisted into the selected RAGFlow session history, the frontend clears the transient streamed question/answer state.
+   - Historical transcript rendering also uses normalized content comparison as a guard against duplicate user/assistant blocks.
+3. Source Citations now starts collapsed and empty.
+   - Static citation examples were removed from runtime state.
+   - A new or empty conversation keeps the citation panel closed.
+   - The panel opens automatically only when the current live answer or selected historical session has at least one real reference.
+4. Source citation cards no longer show the duplicate bottom metadata row.
+   - Removed the document-name/id footer row such as `biz_file_id=UNKNOWN` from each Source Citations card.
+   - The card now shows only `REF`, score, title, and the 400-character preview text.
+5. Backend anti-corruption cleanup was extended without coupling to RAGFlow internals.
+   - Added pure text normalization for model answers so `<think>...</think>` content is kept as one foldable block and duplicated visible answer text is not repeated around it.
+   - The cleanup is applied to both live chat stream payloads and historical session messages.
+   - RAGFlow access remains HTTP-only and configured by `RAGFLOW_BASE_URL`; no RAGFlow source code, database, or filesystem internals were read.
+6. Verified:
+   - `npm.cmd run build`
+   - `.venv\Scripts\python -m compileall app`
+   - `GET /health` returned `ok`
+   - frontend `http://127.0.0.1:5173` returned HTTP 200
+   - temporary session create, rename, and delete succeeded through project APIs
+   - the deleted temporary session did not reappear
+   - historical answer payload had a single normalized think block and did not end with a duplicate think block
+7. Service status after verification:
+   - backend listening on `http://127.0.0.1:8081`
+   - frontend listening on `http://127.0.0.1:5173`
+
+---
+
+Update: 2026-05-13 citation interaction modal
+
+1. Fixed answer citation rendering.
+   - Historical assistant messages now use the same segmented citation renderer as live streamed answers.
+   - Inline `[^1]` markers are rendered as green superscript number buttons instead of raw bracket text.
+   - If a model/session payload ever contains zero-based `[^0]` markers, the frontend normalizes display and lookup to one-based references so answer buttons match `REF [1]` in Source Citations.
+2. Added the citation source modal requested by the user.
+   - Clicking an answer citation opens a modal with the cited source title, reference number, and cited text fragment.
+   - Clicking a Source Citations card opens the same modal.
+   - The modal follows the provided visual structure: blurred backdrop, white rounded panel, article icon, metadata row, highlighted text passage, and footer close button.
+3. Removed success/failure chatter for session actions.
+   - Rename/delete/pin/unpin no longer show success text below the session list.
+   - Rename/delete failures refresh the session list silently instead of surfacing a toast-like message in the replica UI.
+4. Verified:
+   - `npm.cmd run build`
+   - `.venv\Scripts\python -m compileall app`
+   - `GET /health` returned `ok`
+   - `GET /api/ragflow/config` returned datasets/chats through the anti-corruption layer
+   - `GET /api/ragflow/models` returned the configured model option
+   - frontend `http://127.0.0.1:5173` returned HTTP 200
+5. Service status after verification:
+   - backend listening on `http://127.0.0.1:8081`
+   - frontend listening on `http://127.0.0.1:5173`
+
+---
+
+Update: 2026-05-13 citation source consistency and browser stream compatibility
+
+1. Fixed cross-browser streaming connection behavior in the frontend client.
+   - The stream connection timeout is now disposed immediately after the streaming response body is acquired.
+   - This avoids aborting an already-open stream in browsers whose Fetch/ReadableStream timing differs from Chrome.
+   - The frontend still reports backend/network failures, but should no longer self-abort a valid stream after connection.
+2. Changed citation numbering to preserve RAGFlow numbering.
+   - The anti-corruption layer now converts RAGFlow inline tokens such as `##0$$` and `[ID:7]` to `[^0]` and `[^7]`, preserving the numeric value instead of renumbering by display order.
+   - The frontend displays and opens exactly the reference number found in the answer text.
+   - The only fallback numbering is for malformed cases where RAGFlow returns reference objects but the answer text contains no inline citation markers.
+3. Fixed Source Citations state ownership.
+   - Removed the local session-reference cache from the replica UI.
+   - Source Citations now shows current live references while streaming/current answer is transient.
+   - Otherwise it shows only the latest assistant message with references from the currently selected RAGFlow session.
+   - Switching/deleting sessions clears the citation modal and prevents previous-session references from leaking into the next session.
+4. Changed the source modal content behavior.
+   - The modal now displays the full cited chunk content from the reference DTO, not the 400-character card preview.
+   - The modal body has a fixed max height and its own vertical scroll area, so long cited text does not resize the modal.
+   - Removed the highlighted span from the cited original text.
+5. Verified:
+   - `npm.cmd run build`
+   - `.venv\Scripts\python -m compileall app`
+   - `GET /health` returned `ok`
+   - `GET /api/ragflow/config` returned datasets/chats through the anti-corruption layer
+   - `GET /api/ragflow/models` returned the configured model option
+   - frontend `http://127.0.0.1:5173` returned HTTP 200
+6. Service status after verification:
+   - backend listening on `http://127.0.0.1:8081`
+   - frontend listening on `http://127.0.0.1:5173`
+
+---
+
+Update: 2026-05-14 citation numbering and per-turn citation interaction
+
+1. Numbering fix:
+   - Source Citations fallback numbering now starts at `0`, matching RAGFlow's zero-based citation tokens when the answer contains `[^0]`.
+   - If RAGFlow supplies explicit citation markers in the answer, the UI continues to use those exact numbers.
+2. Per-turn citation model:
+   - Each assistant answer can now own its own citation set.
+   - Clicking a citation number inside a historical answer switches Source Citations to that answer's citation set instead of always showing the latest citations.
+   - If a later answer has no citations, Source Citations keeps the previous citation set for the current session.
+   - Starting or selecting a different session resets the active citation selection and prevents cross-session leakage.
+3. Interaction behavior:
+   - Clicking a citation number opens the Source Citations column, highlights the matching card with a secondary border/glow, and scrolls that card into the middle of the citation column.
+   - Clicking a Source Citations card still opens the full original chunk modal.
+4. Verification:
+   - `npm.cmd run build` passed.
+   - `.venv\Scripts\python -m compileall app` passed.
+   - A foreground local run of backend/frontend returned `ok` for both health checks during verification; background starts remain sensitive to the Windows `Path/PATH` environment duplication in this shell.
+
+---
+
+Update: 2026-05-14 Source Citations recovery and citation-state hardening
+
+1. Root cause:
+   - A temporary RAGFlow-backed chat through the integration service returned live answer references correctly: 8 citation chunks, with full `chunk_content` present.
+   - The same temporary session, when reloaded through RAGFlow session history/session detail APIs, returned 3 messages but 0 persisted references.
+   - Therefore the blank Source Citations panel was caused by frontend state cleanup trusting history references too early and clearing the live citation state, not by RAGFlow retrieval failing.
+2. Frontend fix:
+   - Extracted citation-source mapping into `D_ass/src/lib/citation-sources.ts`.
+   - Added `D_ass/src/composables/useSessionCitationSnapshots.ts` as a small session-scoped fallback for references already returned by the integration service in the current browser session.
+   - `App.vue` now resolves Source Citations in strict order:
+     live references from the current answer, latest referenced turn from the selected session, then the selected session's citation snapshot.
+   - Deleting a session removes its citation snapshot; switching sessions resets transient chat state and closes stale citation modals.
+   - The source modal now renders the full cited chunk text, while cards still use the short preview.
+3. Backend hardening:
+   - `RagflowConfigAdapter.list_sessions` now combines RAGFlow's official session list and single-session detail HTTP endpoints when detail is available.
+   - Session messages are represented as Pydantic DTOs (`RagflowSessionMessageResult` / `RagflowSessionMessageResponse`) instead of raw dicts.
+   - Reference anti-corruption mapping accepts several RAGFlow reference field spellings while still exposing only business DTO fields.
+4. Constraints honored:
+   - No RAGFlow source code was read or imported.
+   - No RAGFlow internal database/filesystem access was used.
+   - The frontend still calls only `ragflow_integration_service`; direct RAGFlow access remains confined to the backend adapter through `RAGFLOW_BASE_URL`.
+5. Verification:
+   - `npm.cmd run build` passed.
+   - `.venv\Scripts\python -m compileall app` passed.
+   - `GET http://127.0.0.1:8081/health` returned `ok`.
+   - `GET http://127.0.0.1:5173/health` returned `ok` through the frontend proxy.
+   - Real temporary-session check through `http://127.0.0.1:5173/api/chat/complete` returned `live_reference_count=8`, `live_first_has_full_content=true`, and then the temporary session was deleted.
+   - Browser plugin attachment timed out twice in this Codex environment, so visual click-through could not be completed by automation; HTTP-level user-path checks confirmed the citation data route is live.
+
+---
+
+Update: 2026-05-14 cross-browser chat transport fix
+
+1. Root cause addressed:
+   - The frontend was still configured to call `http://localhost:8081` directly from the browser.
+   - Chrome tolerated the local cross-origin streaming path more reliably, while other browsers could fail the Fetch/ReadableStream request with `Streaming connection failed`.
+2. Frontend transport changes:
+   - `D_ass/.env` and `D_ass/.env.example` now keep `VITE_RAGFLOW_INTEGRATION_BASE_URL` empty for local development.
+   - `D_ass/src/config/app-config.ts` now defaults to an empty base URL, so browser requests are same-origin paths such as `/api/chat` and `/health`.
+   - `D_ass/vite.config.ts` proxies `/api` and `/health` to `http://127.0.0.1:8081` from the dev server, avoiding direct browser-to-backend cross-origin streaming.
+   - `D_ass/README.md` now documents the same-origin proxy setup and warns against setting a direct local backend origin unless deployment CORS/proxy rules intentionally support it.
+3. Stream robustness changes:
+   - The SSE connect timeout is cleared as soon as the readable stream is acquired.
+   - If SSE fails before any valid chunk is received, the frontend falls back to the new non-streaming `/api/chat/complete` endpoint.
+   - If SSE fails after at least one valid chunk was received, the frontend preserves the partial/current answer and does not resend the same question, avoiding duplicate RAGFlow session messages.
+4. Backend API addition:
+   - Added `POST /api/chat/complete` with Pydantic response model `ChatResponse`.
+   - The endpoint stays inside `ragflow_integration_service` and reuses `ConversationService`; it does not expose or call RAGFlow directly from the frontend.
+5. Verification:
+   - `npm.cmd run build` passed.
+   - `.venv\Scripts\python -m compileall app` passed.
+   - The dev server currently serves `VITE_RAGFLOW_INTEGRATION_BASE_URL` as an empty string, confirming browsers will call same-origin `/api`.
+   - `GET http://127.0.0.1:5173/health` returned `ok` through the Vite proxy.
+   - Temporary RAGFlow-backed sessions were created, used through `http://127.0.0.1:5173/api/chat/complete` and `http://127.0.0.1:5173/api/chat`, and deleted afterward.
+   - The SSE proxy check returned `text/event-stream` and a final `event: done` marker.
+6. Browser automation note:
+   - The Codex in-app browser control channel timed out while attaching, so visual browser automation could not be completed in this environment.
+   - HTTP-level checks confirmed the exact routes that Firefox/Edge/Safari-like browsers will hit are same-origin and no longer direct `localhost:8081` calls.
+
+---
+
+Update: 2026-05-14 chat history persistence and Edge access fix
+
+1. Fixed the chat history loss issue.
+   - Reproduced the bug with a temporary RAGFlow-backed session: after two chat rounds, the public session DTO previously returned only the latest user/assistant pair.
+   - The cause was the completion request body: the integration service was sending only the latest user message to RAGFlow's completion endpoint.
+   - Updated `RagflowConversationAdapter.stream_chat` to read the selected session's existing sanitized `messages`, append the new user question, and send the full message list to RAGFlow's official HTTP completion API.
+   - This keeps reuse strictly inside the anti-corruption layer and still uses only RAGFlow HTTP APIs through `RAGFLOW_BASE_URL`.
+2. Tightened frontend transient-state cleanup.
+   - After a submitted exchange is confirmed in the selected session history, the frontend now clears the live streamed question/answer state regardless of whether the answer has citations.
+   - This prevents the latest transient response from lingering over the historical transcript when RAGFlow returns no references.
+3. Fixed the Edge/network access path.
+   - `D_ass/vite.config.ts` now fixes dev-server host to `0.0.0.0`, port to `5173`, and `strictPort` to true.
+   - `/api` and `/health` remain proxied to `http://127.0.0.1:8081`, so Edge/Chrome/other browsers all call the same frontend origin.
+   - `.env.example` and `README.md` now document an empty `VITE_RAGFLOW_INTEGRATION_BASE_URL`, avoiding accidental browser-direct calls to `localhost:8081`.
+4. Verification:
+   - `npm.cmd run build` passed.
+   - `.venv\Scripts\python -m compileall app` passed.
+   - `GET http://127.0.0.1:5173/health` returned `ok` through the frontend proxy.
+   - `GET http://localhost:5173/health` returned `ok` through the frontend proxy.
+   - `GET http://localhost:5173/api/ragflow/config` returned the expected RAGFlow-backed config through the integration service.
+   - A temporary session tested through `http://127.0.0.1:5173` retained full history after two chat rounds: `assistant,user,assistant,user,assistant`.
+   - Temporary test sessions were deleted afterward; final check found zero leftover `Codex History*` sessions.
+5. Current local service state:
+   - Frontend dev server is listening on `0.0.0.0:5173`.
+   - Backend integration service is listening on `127.0.0.1:8081`.
+
+---
+
+Update: 2026-05-15 Source Citations refresh and Knowledge Base simplification
+
+1. Source Citations persistence:
+   - Refresh no longer depends on frontend-only citation snapshots for existing conversations.
+   - `RagflowConfigAdapter.list_sessions` now reads RAGFlow session detail through official HTTP APIs and maps session-level `reference` payloads back onto assistant messages.
+   - Multi-turn sessions are aligned by assistant answer order; single-answer sessions combine available reference groups and let the frontend filter by the answer's citation number.
+2. Citation display rules:
+   - Frontend source cards are deduplicated by RAGFlow citation number and sorted ascending.
+   - Source Citations now shows only references whose numbers appear in the selected/live answer.
+   - Repeated citation markers such as multiple `[^0]` occurrences no longer create duplicate source cards.
+3. Thinking display:
+   - Streaming think-only output is shown as a compact collapsible thinking state instead of a normal answer.
+   - Closed `<think>...</think>` blocks without visible answer text no longer leak the thought text into the answer body.
+4. Knowledge Base UI:
+   - The Knowledge Base dialog now keeps only assistant selection and knowledge-base checkbox selection.
+   - Similarity, vector weight, Top K/Top N, rerank, quote, system prompt, and empty-response controls were removed from that UI path.
+   - Knowledge-only save submits only `biz_chat_id` and `biz_knowledge_base_ids`; model selection submits only `llm_id` plus current knowledge-base bindings.
+5. Verification:
+   - `npm.cmd run build` passed.
+   - `.venv\Scripts\python -m compileall app` passed.
+   - Backend restarted on `0.0.0.0:8081`; frontend is reachable at `http://127.0.0.1:5173`.
+   - `GET /api/ragflow/chats/{chat}/sessions` through the frontend proxy returned historical reference counts such as `0,0,8` and `0,0,0,0,4`, proving references are restored from RAGFlow after refresh.
+   - Temporary session create/rename/delete passed and left zero `Codex QA*` sessions.
+   - Idempotent Knowledge Base save preserved the current model ID.

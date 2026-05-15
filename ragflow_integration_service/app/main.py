@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.adapters.ragflow.exceptions import RagflowIntegrationError
 from app.api.schemas import ErrorResponse
-from app.api.routes import chats, health, knowledge_bases
+from app.api.routes import chats, health, knowledge_bases, ragflow_config
 from app.core.constants import DEFAULT_ERROR_STATUS_CODE
 from app.core.config import get_settings
 
@@ -60,3 +60,4 @@ async def handle_unexpected_error(
 app.include_router(health.router)
 app.include_router(knowledge_bases.router)
 app.include_router(chats.router)
+app.include_router(ragflow_config.router)

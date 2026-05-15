@@ -1,13 +1,25 @@
 import { IntegrationApiError, openSseStream, requestBlob, requestJson } from './api-client'
 import type {
+  ChatReference,
   ChatRequest,
   ChatResponse,
-  ChatReference,
+  CreateRagflowSessionPayload,
+  DeleteRagflowSessionResponse,
   FileChunkPreviewResponse,
   HealthResponse,
   KnowledgeFileContentResponse,
   KnowledgeFileDetailResponse,
   ListKnowledgeFilesResponse,
+  ListRagflowModelsResponse,
+  ListRagflowSessionsResponse,
+  RagflowChatConfig,
+  RagflowConfigResponse,
+  RagflowDatasetConfig,
+  RagflowModelOption,
+  RagflowSession,
+  RagflowSessionMessage,
+  UpdateRagflowChatConfigPayload,
+  UpdateRagflowSessionPayload,
   UploadKnowledgeFilePayload,
   UploadKnowledgeFileResponse,
 } from '../types/integration'
@@ -33,7 +45,11 @@ function parseNullableString(value: unknown): string | null {
     return null
   }
 
-  throw new IntegrationApiError('invalid_response', '解析状态详情格式不正确。')
+  throw new IntegrationApiError('invalid_response', 'Invalid nullable string response.')
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
 function isChatReference(value: unknown): value is ChatReference {
@@ -45,13 +61,34 @@ function isChatReference(value: unknown): value is ChatReference {
     typeof value.biz_file_id === 'string' &&
     typeof value.biz_file_name === 'string' &&
     typeof value.chunk_content === 'string' &&
+    (
+      typeof value.reference_number === 'number' ||
+      value.reference_number === null ||
+      typeof value.reference_number === 'undefined'
+    ) &&
     typeof value.similarity_score === 'number'
   )
 }
 
+function parseChatReference(value: unknown): ChatReference {
+  if (!isChatReference(value)) {
+    throw new IntegrationApiError('invalid_response', 'Invalid citation response.')
+  }
+
+  return {
+    biz_file_id: value.biz_file_id,
+    biz_file_name: value.biz_file_name,
+    chunk_content: value.chunk_content,
+    reference_number: typeof value.reference_number === 'number'
+      ? value.reference_number
+      : null,
+    similarity_score: value.similarity_score,
+  }
+}
+
 function parseHealthResponse(value: unknown): HealthResponse {
   if (!isRecord(value) || typeof value.status !== 'string') {
-    throw new IntegrationApiError('invalid_response', '健康检查响应格式不正确。')
+    throw new IntegrationApiError('invalid_response', 'Invalid health response.')
   }
 
   return {
@@ -69,7 +106,7 @@ function parseUploadKnowledgeFileResponse(value: unknown): UploadKnowledgeFileRe
     typeof value.chunk_count !== 'number' ||
     typeof value.token_count !== 'number'
   ) {
-    throw new IntegrationApiError('invalid_response', '上传接口响应格式不正确。')
+    throw new IntegrationApiError('invalid_response', 'Invalid upload response.')
   }
 
   return {
@@ -89,7 +126,7 @@ function parseListKnowledgeFilesResponse(value: unknown): ListKnowledgeFilesResp
     typeof value.knowledge_base_name !== 'string' ||
     !Array.isArray(value.files)
   ) {
-    throw new IntegrationApiError('invalid_response', '文件列表响应格式不正确。')
+    throw new IntegrationApiError('invalid_response', 'Invalid file list response.')
   }
 
   return {
@@ -104,7 +141,7 @@ function parseFileChunkPreviewResponse(value: unknown): FileChunkPreviewResponse
     typeof value.sequence !== 'number' ||
     typeof value.content !== 'string'
   ) {
-    throw new IntegrationApiError('invalid_response', '文件片段响应格式不正确。')
+    throw new IntegrationApiError('invalid_response', 'Invalid chunk preview response.')
   }
 
   return {
@@ -124,7 +161,7 @@ function parseKnowledgeFileDetailResponse(value: unknown): KnowledgeFileDetailRe
     typeof value.token_count !== 'number' ||
     !Array.isArray(value.chunks)
   ) {
-    throw new IntegrationApiError('invalid_response', '文件详情响应格式不正确。')
+    throw new IntegrationApiError('invalid_response', 'Invalid file detail response.')
   }
 
   return {
@@ -141,17 +178,174 @@ function parseKnowledgeFileDetailResponse(value: unknown): KnowledgeFileDetailRe
 
 function parseChatResponse(value: unknown): ChatResponse {
   if (!isRecord(value) || typeof value.answer !== 'string') {
-    throw new IntegrationApiError('invalid_response', '流式回答数据格式不正确。')
+    throw new IntegrationApiError('invalid_response', 'Invalid chat stream response.')
   }
 
   const references = value.references
-  if (!Array.isArray(references) || !references.every(isChatReference)) {
-    throw new IntegrationApiError('invalid_response', '引用数据格式不正确。')
+  if (!Array.isArray(references)) {
+    throw new IntegrationApiError('invalid_response', 'Invalid citation response.')
   }
 
   return {
     answer: value.answer,
+    references: references.map((reference) => parseChatReference(reference)),
+    error_code: parseNullableString(value.error_code),
+    error_message: parseNullableString(value.error_message),
+  }
+}
+
+function parseRagflowDatasetConfig(value: unknown): RagflowDatasetConfig {
+  if (
+    !isRecord(value) ||
+    typeof value.biz_knowledge_base_id !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.embedding_model !== 'string' ||
+    typeof value.chunk_method !== 'string' ||
+    typeof value.document_count !== 'number' ||
+    typeof value.chunk_count !== 'number' ||
+    !isRecord(value.parser_config)
+  ) {
+    throw new IntegrationApiError('invalid_response', 'Invalid RAGFlow dataset config response.')
+  }
+
+  return {
+    biz_knowledge_base_id: value.biz_knowledge_base_id,
+    name: value.name,
+    embedding_model: value.embedding_model,
+    chunk_method: value.chunk_method,
+    document_count: value.document_count,
+    chunk_count: value.chunk_count,
+    parser_config: value.parser_config,
+  }
+}
+
+function parseRagflowChatConfig(value: unknown): RagflowChatConfig {
+  if (
+    !isRecord(value) ||
+    typeof value.biz_chat_id !== 'string' ||
+    typeof value.name !== 'string' ||
+    !isStringArray(value.biz_knowledge_base_ids) ||
+    !isStringArray(value.kb_names) ||
+    typeof value.llm_id !== 'string' ||
+    typeof value.similarity_threshold !== 'number' ||
+    typeof value.vector_similarity_weight !== 'number' ||
+    typeof value.top_k !== 'number' ||
+    typeof value.top_n !== 'number' ||
+    typeof value.rerank_id !== 'string' ||
+    !isRecord(value.prompt_config)
+  ) {
+    throw new IntegrationApiError('invalid_response', 'Invalid RAGFlow assistant config response.')
+  }
+
+  return {
+    biz_chat_id: value.biz_chat_id,
+    name: value.name,
+    biz_knowledge_base_ids: value.biz_knowledge_base_ids,
+    kb_names: value.kb_names,
+    llm_id: value.llm_id,
+    similarity_threshold: value.similarity_threshold,
+    vector_similarity_weight: value.vector_similarity_weight,
+    top_k: value.top_k,
+    top_n: value.top_n,
+    rerank_id: value.rerank_id,
+    prompt_config: value.prompt_config,
+  }
+}
+
+function parseRagflowConfigResponse(value: unknown): RagflowConfigResponse {
+  if (!isRecord(value) || !Array.isArray(value.datasets) || !Array.isArray(value.chats)) {
+    throw new IntegrationApiError('invalid_response', 'Invalid RAGFlow config response.')
+  }
+
+  return {
+    datasets: value.datasets.map((dataset) => parseRagflowDatasetConfig(dataset)),
+    chats: value.chats.map((chat) => parseRagflowChatConfig(chat)),
+  }
+}
+
+function parseRagflowModelOption(value: unknown): RagflowModelOption {
+  if (
+    !isRecord(value) ||
+    typeof value.model_id !== 'string' ||
+    typeof value.label !== 'string' ||
+    typeof value.source !== 'string'
+  ) {
+    throw new IntegrationApiError('invalid_response', 'Invalid RAGFlow model response.')
+  }
+
+  return {
+    model_id: value.model_id,
+    label: value.label,
+    source: value.source,
+  }
+}
+
+function parseListRagflowModelsResponse(value: unknown): ListRagflowModelsResponse {
+  if (!isRecord(value) || !Array.isArray(value.models)) {
+    throw new IntegrationApiError('invalid_response', 'Invalid RAGFlow model list response.')
+  }
+
+  return {
+    models: value.models.map((model) => parseRagflowModelOption(model)),
+  }
+}
+
+function parseRagflowSessionMessage(value: unknown): RagflowSessionMessage | null {
+  if (!isRecord(value) || typeof value.role !== 'string' || typeof value.content !== 'string') {
+    return null
+  }
+
+  if (value.role !== 'user' && value.role !== 'assistant') {
+    return null
+  }
+
+  const references = Array.isArray(value.references)
+    ? value.references
+      .map((reference) => {
+        try {
+          return parseChatReference(reference)
+        } catch {
+          return null
+        }
+      })
+      .filter((reference): reference is ChatReference => reference !== null)
+    : []
+
+  return {
+    role: value.role,
+    content: value.content,
     references,
+  }
+}
+
+function parseRagflowSession(value: unknown): RagflowSession {
+  if (
+    !isRecord(value) ||
+    typeof value.biz_session_id !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.biz_chat_id !== 'string' ||
+    !Array.isArray(value.messages)
+  ) {
+    throw new IntegrationApiError('invalid_response', 'Invalid RAGFlow session response.')
+  }
+
+  return {
+    biz_session_id: value.biz_session_id,
+    name: value.name,
+    biz_chat_id: value.biz_chat_id,
+    messages: value.messages
+      .map((message) => parseRagflowSessionMessage(message))
+      .filter((message): message is RagflowSessionMessage => message !== null),
+  }
+}
+
+function parseListRagflowSessionsResponse(value: unknown): ListRagflowSessionsResponse {
+  if (!isRecord(value) || !Array.isArray(value.sessions)) {
+    throw new IntegrationApiError('invalid_response', 'Invalid RAGFlow session list response.')
+  }
+
+  return {
+    sessions: value.sessions.map((session) => parseRagflowSession(session)),
   }
 }
 
@@ -190,6 +384,92 @@ export async function getHealth(): Promise<HealthResponse> {
     method: 'GET',
   })
   return parseHealthResponse(response)
+}
+
+export async function getRagflowConfig(): Promise<RagflowConfigResponse> {
+  const response = await requestJson<unknown>('/api/ragflow/config', {
+    method: 'GET',
+  })
+  return parseRagflowConfigResponse(response)
+}
+
+export async function listRagflowModels(): Promise<ListRagflowModelsResponse> {
+  const response = await requestJson<unknown>('/api/ragflow/models', {
+    method: 'GET',
+  })
+  return parseListRagflowModelsResponse(response)
+}
+
+export async function listRagflowChatSessions(
+  chatId: string,
+): Promise<ListRagflowSessionsResponse> {
+  const response = await requestJson<unknown>(`/api/ragflow/chats/${chatId}/sessions`, {
+    method: 'GET',
+  })
+  return parseListRagflowSessionsResponse(response)
+}
+
+export async function createRagflowChatSession(
+  chatId: string,
+  payload: CreateRagflowSessionPayload,
+): Promise<RagflowSession> {
+  const response = await requestJson<unknown>(`/api/ragflow/chats/${chatId}/sessions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  return parseRagflowSession(response)
+}
+
+export async function updateRagflowChatSession(
+  chatId: string,
+  sessionId: string,
+  payload: UpdateRagflowSessionPayload,
+): Promise<RagflowSession> {
+  const response = await requestJson<unknown>(
+    `/api/ragflow/chats/${chatId}/sessions/${sessionId}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  )
+  return parseRagflowSession(response)
+}
+
+export async function deleteRagflowChatSession(
+  chatId: string,
+  sessionId: string,
+): Promise<DeleteRagflowSessionResponse> {
+  const response = await requestJson<unknown>(
+    `/api/ragflow/chats/${chatId}/sessions/${sessionId}`,
+    {
+      method: 'DELETE',
+    },
+  )
+  if (!isRecord(response) || typeof response.deleted !== 'boolean') {
+    throw new IntegrationApiError('invalid_response', 'Invalid RAGFlow delete response.')
+  }
+  return {
+    deleted: response.deleted,
+  }
+}
+
+export async function updateRagflowChatConfig(
+  payload: UpdateRagflowChatConfigPayload,
+): Promise<RagflowChatConfig> {
+  const response = await requestJson<unknown>('/api/ragflow/chats/config', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  return parseRagflowChatConfig(response)
 }
 
 export async function uploadKnowledgeFile(
@@ -262,10 +542,37 @@ export async function streamChat(
   onChunk: (chunk: ChatResponse) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  let hasReceivedChunk = false
+
+  try {
+    await streamChatWithSse(
+      payload,
+      (chunk) => {
+        hasReceivedChunk = true
+        onChunk(chunk)
+      },
+      signal,
+    )
+  } catch (error: unknown) {
+    if (signal?.aborted || hasReceivedChunk) {
+      throw error
+    }
+
+    const fallbackResponse = await completeChat(payload, signal)
+    onChunk(fallbackResponse)
+  }
+}
+
+async function streamChatWithSse(
+  payload: ChatRequest,
+  onChunk: (chunk: ChatResponse) => void,
+  signal?: AbortSignal,
+): Promise<void> {
   const reader = await openSseStream('/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
     },
     body: JSON.stringify(payload),
     signal,
@@ -284,29 +591,54 @@ export async function streamChat(
       buffer += textDecoder.decode(value, { stream: true })
       const blocks = buffer.split('\n\n')
       buffer = blocks.pop() ?? ''
-
-      for (const block of blocks) {
-        const event = parseSseBlock(block)
-        if (!event) {
-          continue
-        }
-
-        if (event.event === DONE_EVENT_NAME || event.data === DONE_EVENT_PAYLOAD) {
-          return
-        }
-
-        let payload: unknown
-        try {
-          payload = JSON.parse(event.data) as unknown
-        } catch {
-          throw new IntegrationApiError('invalid_response', '流式回答不是有效 JSON。')
-        }
-
-        onChunk(parseChatResponse(payload))
+      if (processSseBlocks(blocks, onChunk)) {
+        return
       }
     }
   } finally {
     await reader.cancel().catch(() => undefined)
     reader.releaseLock()
   }
+}
+
+function processSseBlocks(
+  blocks: string[],
+  onChunk: (chunk: ChatResponse) => void,
+): boolean {
+  for (const block of blocks) {
+    const event = parseSseBlock(block)
+    if (!event) {
+      continue
+    }
+
+    if (event.event === DONE_EVENT_NAME || event.data === DONE_EVENT_PAYLOAD) {
+      return true
+    }
+
+    let payload: unknown
+    try {
+      payload = JSON.parse(event.data) as unknown
+    } catch {
+      throw new IntegrationApiError('invalid_response', 'Stream chunk was not valid JSON.')
+    }
+
+    onChunk(parseChatResponse(payload))
+  }
+
+  return false
+}
+
+async function completeChat(
+  payload: ChatRequest,
+  signal?: AbortSignal,
+): Promise<ChatResponse> {
+  const response = await requestJson<unknown>('/api/chat/complete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    signal,
+  })
+  return parseChatResponse(response)
 }

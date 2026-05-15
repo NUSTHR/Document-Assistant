@@ -1,73 +1,57 @@
 # D_ass Frontend
 
-这是当前项目的前端联调控制台，职责只有一个：调用 `ragflow_integration_service`，验证防腐层接口是否正常工作。
+This frontend is the local chat UI for the Documentation Assistant project. It
+talks only to `ragflow_integration_service`; it must never call RAGFlow directly.
 
-## 功能范围
+## Environment
 
-- 健康检查：调用 `GET /health`
-- 文件上传：调用 `POST /api/files`
-- 流式对话：调用 `POST /api/chat`
-- 引用展示：展示防腐层返回的 `biz_file_id`、`biz_file_name`、`chunk_content`、`similarity_score`
-
-## 环境变量
-
-先复制环境变量模板：
+Copy the local environment template before starting the dev server:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-默认配置如下：
+Default values:
 
 ```env
-VITE_RAGFLOW_INTEGRATION_BASE_URL=http://localhost:8081
+VITE_RAGFLOW_INTEGRATION_BASE_URL=
 VITE_RAGFLOW_REQUEST_TIMEOUT_MS=10000
 VITE_RAGFLOW_STREAM_CONNECT_TIMEOUT_MS=15000
 ```
 
-字段说明：
+`VITE_RAGFLOW_INTEGRATION_BASE_URL` is intentionally empty for local
+development. Vite serves the UI on port `5173` and proxies same-origin `/api`
+and `/health` requests to `http://127.0.0.1:8081`.
 
-- `VITE_RAGFLOW_INTEGRATION_BASE_URL`：后端防腐层服务地址
-- `VITE_RAGFLOW_REQUEST_TIMEOUT_MS`：普通 HTTP 请求超时
-- `VITE_RAGFLOW_STREAM_CONNECT_TIMEOUT_MS`：流式接口建立连接超时
+This keeps Chrome, Edge, Firefox, and other browsers on the same request model:
+the browser calls the frontend origin, and the dev server forwards requests to
+the integration service.
 
-## 启动方式
+## Development
 
-安装依赖：
+Start `ragflow_integration_service` first on `http://127.0.0.1:8081`, then run:
 
 ```powershell
 npm install
-```
-
-启动开发服务器：
-
-```powershell
 npm run dev
 ```
 
-构建检查：
+The dev server is configured with a fixed port and host:
+
+```text
+http://127.0.0.1:5173
+http://localhost:5173
+```
+
+## Build Check
 
 ```powershell
 npm run build
 ```
 
-## 页面输入说明
+## Backend Boundary
 
-上传区域需要填写：
-
-- `knowledge_base_name`
-- `biz_file_id`
-- `biz_file_name`
-- 文件本体
-
-对话区域需要填写：
-
-- `assistant_name`
-- `question`
-- `session_name`，可留空
-
-## 联调前提
-
-- `ragflow_integration_service` 必须已经启动
-- 后端 `.env` 中必须填入真实 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY`
-- 如果后端仍使用占位配置，前端只能验证页面与请求链路，不能验证真实 RAGFlow 业务结果
+All RAGFlow HTTP API calls belong in `ragflow_integration_service`. The
+frontend should call only project endpoints such as `/api/chat`,
+`/api/ragflow/config`, `/api/ragflow/chats/{biz_chat_id}/sessions`, and
+`/health`.

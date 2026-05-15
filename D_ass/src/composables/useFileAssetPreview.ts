@@ -111,8 +111,8 @@ export function useFileAssetPreview(
         fileName: selectedFile.bizFileName,
         helperText:
           previewMode === 'unsupported'
-            ? '浏览器当前不适合直接预览该格式，已提供原文下载入口。'
-            : '当前为浏览器支持范围内的原文预览，适合做快速人工核对。',
+            ? 'This format is not suitable for direct browser preview.'
+            : 'Original file preview is available in the browser.',
         mediaType: response.mediaType,
         mode: previewMode,
         objectUrl,
@@ -126,7 +126,7 @@ export function useFileAssetPreview(
       }
 
       clearPreview()
-      errorMessage.value = toFriendlyMessage(error, '原文加载失败。')
+      errorMessage.value = toFriendlyMessage(error, 'Failed to load source file.')
     } finally {
       if (requestVersion.value === currentRequestVersion) {
         isLoading.value = false

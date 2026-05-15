@@ -8,7 +8,6 @@ dependencies = [
   "uvicorn[standard]>=0.32.0,<1.0.0",
   "pydantic-settings>=2.6.0,<3.0.0",
   "python-multipart>=0.0.17,<1.0.0",
-  "ragflow-sdk>=0.18.0",
 ]
 
 [build-system]

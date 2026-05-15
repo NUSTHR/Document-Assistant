@@ -4,7 +4,7 @@ import { getKnowledgeFileDetail } from '../lib/integration-api'
 import { toFriendlyMessage } from '../lib/workspace-errors'
 import { toFileDetailPanelState } from '../lib/workspace-presenters'
 import type { KnowledgeFileDetailResponse } from '../types/integration'
-import type { ReferenceCard, KnowledgeFileItem } from '../types/workspace'
+import type { KnowledgeFileItem, ReferenceCard } from '../types/workspace'
 
 export function useFileDetailPreview(
   currentFile: ComputedRef<KnowledgeFileItem | null>,
@@ -52,7 +52,7 @@ export function useFileDetailPreview(
       }
 
       rawFileDetail.value = null
-      errorMessage.value = toFriendlyMessage(error, '文件详情加载失败。')
+      errorMessage.value = toFriendlyMessage(error, 'Failed to load file details.')
     } finally {
       if (requestVersion.value === currentRequestVersion) {
         isLoading.value = false
