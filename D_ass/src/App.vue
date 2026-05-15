@@ -306,7 +306,15 @@ const sourceItems = computed<SourceItem[]>(() => {
     const selectedMessage = transcriptMessages.value.find((message) => {
       return message.id === activeCitationMessageId.value
     })
-    if (selectedMessage?.references.length) {
+    if (selectedMessage) {
+      if (!selectedMessage.references.length) {
+        const selectedSnapshot = readSessionCitationSnapshot(
+          sessionId.value,
+          activeCitationMessageId.value,
+        )
+        return selectedSnapshot.length > 0 ? normalizeSourceItems(selectedSnapshot) : []
+      }
+
       return toHistoricalSourceItems(
         selectedMessage.references,
         selectedMessage.referenceNumbers,
@@ -448,7 +456,23 @@ watch(sessionId, () => {
 })
 
 watch(sourceItems, (items) => {
+  sourceCardElements.value = {}
   if (items.length > 0) {
+    if (
+      activeSourceReferenceNumber.value !== null &&
+      !items.some((item) => item.referenceNumber === activeSourceReferenceNumber.value)
+    ) {
+      activeSourceReferenceNumber.value = null
+    }
+    const activeModal = activeSourceModal.value
+    if (activeModal) {
+      const modalIsStillVisible = items.some((item) => {
+        return sourceElementKey(item) === sourceElementKey(activeModal)
+      })
+      if (!modalIsStillVisible) {
+        activeSourceModal.value = null
+      }
+    }
     citationsOpen.value = true
     return
   }
@@ -528,12 +552,10 @@ async function loadSessions(
     if (activeSession) {
       sessionId.value = activeSession.biz_session_id
       sessionName.value = activeSession.name
-      if (!activeCitationMessageId.value) {
-        const latestReferenceCarrier = findLatestReferencedSessionMessage(activeSession)
-        activeCitationMessageId.value = latestReferenceCarrier
-          ? toTranscriptMessageId(activeSession.biz_session_id, latestReferenceCarrier.index)
-          : ''
-      }
+      activeCitationMessageId.value = resolveActiveCitationMessageId(
+        activeSession,
+        activeCitationMessageId.value,
+      )
     } else {
       sessionId.value = ''
       sessionName.value = ''
@@ -666,8 +688,6 @@ async function submitCurrentQuestion(): Promise<void> {
   }
 
   const currentQuestion = question.value.trim()
-  const previousCitationMessageId =
-    activeCitationMessageId.value || latestTurnReferencedMessage.value?.id || ''
   activeSourceReferenceNumber.value = null
   await submitChat()
 
@@ -699,10 +719,10 @@ async function submitCurrentQuestion(): Promise<void> {
         liveSourceItems.value,
       )
     }
-    if (liveSourceItems.value.length > 0) {
+    if (currentAnswerHasPersistedReferences || liveSourceItems.value.length > 0) {
       activeCitationMessageId.value = matchingMessageId
-    } else if (previousCitationMessageId) {
-      activeCitationMessageId.value = previousCitationMessageId
+    } else {
+      activeCitationMessageId.value = ''
     }
     clearTransientAnswer({ keepReferences: !currentAnswerHasPersistedReferences })
   }
@@ -840,6 +860,9 @@ function openSourceReference(
 
   const source = sourceItems.value.find((item) => item.referenceNumber === referenceNumber)
   if (!source) {
+    activeSourceReferenceNumber.value = null
+    activeSourceModal.value = null
+    citationsOpen.value = true
     return
   }
 
@@ -1094,17 +1117,74 @@ function findMatchingTranscriptMessage(
   return null
 }
 
-function findLatestReferencedSessionMessage(
+function resolveActiveCitationMessageId(
+  session: RagflowSession,
+  candidateMessageId: string,
+): string {
+  const candidateIndex = parseTranscriptMessageIndex(session, candidateMessageId)
+  if (
+    candidateIndex !== null &&
+    hasDisplayableSessionReferences(session.messages[candidateIndex])
+  ) {
+    return candidateMessageId
+  }
+
+  const latestReferenceCarrier = findLatestDisplayableSessionMessage(session)
+  return latestReferenceCarrier
+    ? toTranscriptMessageId(session.biz_session_id, latestReferenceCarrier.index)
+    : ''
+}
+
+function parseTranscriptMessageIndex(
+  session: RagflowSession,
+  messageId: string,
+): number | null {
+  const prefix = `${session.biz_session_id}-`
+  if (!messageId.startsWith(prefix)) {
+    return null
+  }
+
+  const rawIndex = messageId.slice(prefix.length)
+  const index = Number(rawIndex)
+  if (!Number.isInteger(index) || index < 0 || index >= session.messages.length) {
+    return null
+  }
+
+  return index
+}
+
+function findLatestDisplayableSessionMessage(
   session: RagflowSession,
 ): { index: number } | null {
   for (let index = session.messages.length - 1; index >= 0; index -= 1) {
     const message = session.messages[index]
-    if (message?.references.length) {
+    if (hasDisplayableSessionReferences(message)) {
       return { index }
     }
   }
 
   return null
+}
+
+function hasDisplayableSessionReferences(
+  message: RagflowSession['messages'][number] | undefined,
+): boolean {
+  if (!message || message.role !== 'assistant' || message.references.length === 0) {
+    return false
+  }
+
+  const presentation = splitThoughtContent(message.content)
+  const answerSegments = toAnswerSegments(presentation.answer)
+  const citedReferenceNumbers = extractCitedReferenceNumbers(answerSegments)
+  if (citedReferenceNumbers.length === 0) {
+    return false
+  }
+
+  return toHistoricalSourceItems(
+    message.references,
+    resolveReferenceNumbers(answerSegments, message.references.length),
+    citedReferenceNumbers,
+  ).length > 0
 }
 
 function toTranscriptMessageId(nextSessionId: string, messageIndex: number): string {

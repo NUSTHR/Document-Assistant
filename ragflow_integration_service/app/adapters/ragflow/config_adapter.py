@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from app.adapters.ragflow.anti_corruption import clean_model_answer, to_reference_result
@@ -40,6 +41,7 @@ _REFERENCE_DOCUMENT_KEYS = (
     "filename",
     "name",
 )
+_CLEANED_CITATION_PATTERN = re.compile(r"\[\^(?P<number>\d+)\]")
 
 
 class RagflowConfigAdapter:
@@ -463,11 +465,12 @@ class RagflowConfigAdapter:
             content = message.get("content")
             if content is None:
                 content = message.get("answer")
+            cleaned_content = clean_model_answer(str(content or ""))
             references = self._sanitize_message_references(message)
             sanitized_messages.append(
                 RagflowSessionMessageResult(
                     role=normalized_role,
-                    content=clean_model_answer(str(content or "")),
+                    content=cleaned_content,
                     references=references,
                 )
             )
@@ -492,22 +495,114 @@ class RagflowConfigAdapter:
             message_index = assistant_answer_indices[0]
             if messages[message_index].references:
                 return
-            combined_references: list[ReferenceResult] = []
-            for reference_set in reference_sets:
-                combined_references.extend(reference_set)
-            messages[message_index].references = combined_references
+            citations = self._extract_cited_reference_numbers(
+                messages[message_index].content
+            )
+            matching_references = self._find_covering_reference_set(
+                reference_sets,
+                citations,
+            )
+            if matching_references:
+                messages[message_index].references = matching_references
+                return
+
+            messages[message_index].references = self._flatten_reference_sets(reference_sets)
             return
 
         if len(reference_sets) <= len(assistant_answer_indices):
             target_indices = assistant_answer_indices[-len(reference_sets):]
+            reference_set_start_index = 0
             aligned_reference_sets = reference_sets
         else:
             target_indices = assistant_answer_indices
+            reference_set_start_index = len(reference_sets) - len(assistant_answer_indices)
             aligned_reference_sets = reference_sets[-len(assistant_answer_indices):]
 
-        for message_index, reference_set in zip(target_indices, aligned_reference_sets):
-            if not messages[message_index].references:
+        for offset, (message_index, reference_set) in enumerate(
+            zip(target_indices, aligned_reference_sets)
+        ):
+            if messages[message_index].references:
+                continue
+
+            citations = self._extract_cited_reference_numbers(
+                messages[message_index].content
+            )
+            if citations:
+                matching_references = self._find_covering_reference_set(
+                    reference_sets,
+                    citations,
+                    before_index=reference_set_start_index + offset + 1,
+                )
+                if matching_references:
+                    messages[message_index].references = matching_references
+                    continue
+
+            if reference_set:
                 messages[message_index].references = reference_set
+                continue
+
+    def _flatten_reference_sets(
+        self,
+        reference_sets: list[list[ReferenceResult]],
+    ) -> list[ReferenceResult]:
+        references: list[ReferenceResult] = []
+        for reference_set in reference_sets:
+            references.extend(reference_set)
+        return references
+
+    def _find_covering_reference_set(
+        self,
+        reference_sets: list[list[ReferenceResult]],
+        citations: set[int],
+        before_index: int | None = None,
+    ) -> list[ReferenceResult]:
+        if not citations:
+            return []
+
+        candidate_sets = (
+            reference_sets[:before_index]
+            if before_index is not None
+            else reference_sets
+        )
+        best_reference_set: list[ReferenceResult] = []
+        best_score: tuple[int, int] | None = None
+        for index, reference_set in enumerate(candidate_sets):
+            reference_numbers = self._reference_number_set(reference_set)
+            if not citations.issubset(reference_numbers):
+                continue
+
+            score = (
+                len(reference_numbers - citations),
+                -index,
+            )
+            if best_score is None or score < best_score:
+                best_score = score
+                best_reference_set = reference_set
+        return best_reference_set
+
+    def _references_cover_citations(
+        self,
+        references: list[ReferenceResult],
+        citations: set[int],
+    ) -> bool:
+        if not references:
+            return False
+
+        reference_numbers = self._reference_number_set(references)
+        return citations.issubset(reference_numbers)
+
+    def _reference_number_set(self, references: list[ReferenceResult]) -> set[int]:
+        return {
+            reference.reference_number
+            for reference in references
+            if reference.reference_number is not None
+        }
+
+    def _extract_cited_reference_numbers(self, content: str) -> set[int]:
+        cited_numbers: set[int] = set()
+        for match in _CLEANED_CITATION_PATTERN.finditer(content):
+            cited_numbers.add(int(match.group("number")))
+        return cited_numbers
 
     def _sanitize_message_references(self, message: dict[str, Any]) -> list[ReferenceResult]:
         raw_reference = message.get("reference")

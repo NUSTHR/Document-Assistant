@@ -1390,3 +1390,26 @@ Update: 2026-05-15 Source Citations refresh and Knowledge Base simplification
    - `GET /api/ragflow/chats/{chat}/sessions` through the frontend proxy returned historical reference counts such as `0,0,8` and `0,0,0,0,4`, proving references are restored from RAGFlow after refresh.
    - Temporary session create/rename/delete passed and left zero `Codex QA*` sessions.
    - Idempotent Knowledge Base save preserved the current model ID.
+
+---
+
+Update: 2026-05-15 Source Citation state audit hardening
+
+1. Frontend state-machine hardening:
+   - `activeCitationMessageId` is now validated against the currently selected session after each session reload.
+   - If a previously active message no longer belongs to the current session or no longer has displayable citations, the UI falls back to the selected session's latest displayable assistant answer.
+   - Clicking an answer citation that cannot resolve a source no longer falls back to stale source cards from another answer; it opens the citation area with no stale active source.
+   - `sourceCardElements`, active modal, and active highlight are cleared when the source set changes and no longer contains the active reference.
+2. Backend reference matching hardening:
+   - RAGFlow session-level `reference` groups are still reused through official HTTP API data only.
+   - The anti-corruption layer now matches references to assistant answers by the answer's cleaned citation numbers.
+   - Matching prefers an exact citation-number set and otherwise chooses the covering group with the fewest extra reference numbers, preventing accidental assignment to a later broader reference group.
+   - Empty latest reference groups can still fall back to the closest previous group that covers the answer's cited numbers.
+   - Non-empty but misaligned reference groups are no longer accepted blindly; the adapter first checks whether the group covers the answer's actual citation numbers.
+3. Verification:
+   - `npm.cmd run build` passed.
+   - `.venv\Scripts\python -m compileall app` passed.
+   - Backend synthetic tests covered empty latest reference fallback and misaligned non-empty reference groups.
+   - Real RAGFlow-backed session checks confirmed all cited assistant answers resolve their source cards.
+   - Repeated session reload returned stable reference signatures.
+   - Temporary two-turn citation audit sessions verified both the first and second assistant answers after reload, then were deleted; no `Codex Citation*` or `Codex QA*` sessions remained.
