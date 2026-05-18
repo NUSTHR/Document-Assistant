@@ -1413,3 +1413,40 @@ Update: 2026-05-15 Source Citation state audit hardening
    - Real RAGFlow-backed session checks confirmed all cited assistant answers resolve their source cards.
    - Repeated session reload returned stable reference signatures.
    - Temporary two-turn citation audit sessions verified both the first and second assistant answers after reload, then were deleted; no `Codex Citation*` or `Codex QA*` sessions remained.
+
+---
+
+Update: 2026-05-18 engineering-quality refactor and citation-state hardening
+
+1. Engineering audit findings:
+   - The frontend chat page still had too much citation state logic embedded directly in `App.vue`, making session switching, live answer references, and historical references harder to reason about.
+   - The backend RAGFlow config adapter mixed HTTP DTO mapping with reference-set alignment logic, which made the anti-corruption layer correct but harder to test in isolation.
+   - The project had build checks, but citation state and RAGFlow session reference alignment did not yet have explicit regression tests.
+2. Frontend refactor:
+   - Added `D_ass/src/lib/citation-state.ts` as a pure citation-state module.
+   - Moved active citation message resolution and Source Citations display selection out of `App.vue`.
+   - Centralized citation UI reset in `resetCitationUi`, with a synchronous session watcher so session changes cannot leave stale source cards, highlights, or modals behind.
+   - Added `D_ass/scripts/test-citation-state.cjs` and `npm run test:citation` to cover:
+     - invalid active citation fallback to the selected session's latest cited answer,
+     - repeated citation deduplication and ascending sort,
+     - live references taking precedence while streaming,
+     - snapshot fallback for references that have not yet been persisted back into RAGFlow session detail.
+3. Backend refactor:
+   - Added `ragflow_integration_service/app/adapters/ragflow/reference_alignment.py`.
+   - Moved RAGFlow session-level reference group alignment into a pure module reused by `RagflowConfigAdapter`.
+   - The backend still only reuses RAGFlow through official HTTP API data and keeps all physical IDs converted to business DTOs before returning to the frontend.
+4. Tests and build:
+   - Added `ragflow_integration_service/tests/test_reference_alignment.py` plus a no-extra-dependency runner `tests/run_reference_alignment.py`.
+   - Added optional backend dev dependency `pytest>=8,<9` for CI or full local test environments.
+   - Verified:
+     - `npm.cmd run build` passed.
+     - `npm.cmd run test:citation` passed.
+     - `.venv\Scripts\python -m compileall app tests` passed.
+     - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
+5. Runtime verification:
+   - Backend restarted on `0.0.0.0:8081`.
+   - Frontend dev server is listening on `0.0.0.0:5173`; the page was opened at `http://127.0.0.1:5173`.
+   - `GET http://127.0.0.1:5173` returned 200.
+   - `GET http://127.0.0.1:5173/health` returned `ok`.
+   - `GET http://127.0.0.1:5173/api/ragflow/config` currently returns 502 because `.env` points `RAGFLOW_BASE_URL` to `http://127.0.0.1:18080`, and no service is listening on that port.
+   - This blocks real RAGFlow-backed chat/session/citation end-to-end testing until RAGFlow is started again, but the frontend/backend integration route itself is active and same-origin through the frontend proxy.

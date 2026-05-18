@@ -16,14 +16,14 @@ import { toFriendlyMessage } from './lib/workspace-errors'
 import { toAnswerSegments } from './lib/workspace-presenters'
 import {
   extractCitedReferenceNumbers,
-  findLatestReferencedMessage,
-  findLatestTurnReferencedMessage,
-  normalizeSourceItems,
   resolveReferenceNumbers,
-  toHistoricalSourceItems,
   toLiveSourceItems,
   type SourceItem,
 } from './lib/citation-sources'
+import {
+  resolveDisplayedSourceItems,
+  resolveActiveCitationMessageId,
+} from './lib/citation-state'
 import type {
   ChatReference,
   RagflowChatConfig,
@@ -220,14 +220,6 @@ const isLiveThinkingOnly = computed(() => {
   )
 })
 
-const latestTurnReferencedMessage = computed<TranscriptMessage | null>(() => {
-  return findLatestTurnReferencedMessage(transcriptMessages.value)
-})
-
-const latestReferencedMessage = computed<TranscriptMessage | null>(() => {
-  return findLatestReferencedMessage(transcriptMessages.value)
-})
-
 const displayedTranscriptMessages = computed<TranscriptMessage[]>(() => {
   const duplicateIds = new Set<string>()
   const liveAnswer = chatErrorMessage.value || streamedAnswer.value
@@ -298,49 +290,15 @@ const sourceItems = computed<SourceItem[]>(() => {
       streamedAnswer.value.length > 0
     )
 
-  if (hasLiveReferenceState) {
-    return liveSourceItems.value
-  }
-
-  if (activeCitationMessageId.value) {
-    const selectedMessage = transcriptMessages.value.find((message) => {
-      return message.id === activeCitationMessageId.value
-    })
-    if (selectedMessage) {
-      if (!selectedMessage.references.length) {
-        const selectedSnapshot = readSessionCitationSnapshot(
-          sessionId.value,
-          activeCitationMessageId.value,
-        )
-        return selectedSnapshot.length > 0 ? normalizeSourceItems(selectedSnapshot) : []
-      }
-
-      return toHistoricalSourceItems(
-        selectedMessage.references,
-        selectedMessage.referenceNumbers,
-        selectedMessage.citedReferenceNumbers,
-      )
-    }
-
-    const selectedSnapshot = readSessionCitationSnapshot(
-      sessionId.value,
-      activeCitationMessageId.value,
-    )
-    if (selectedSnapshot.length > 0) {
-      return normalizeSourceItems(selectedSnapshot)
-    }
-  }
-
-  const historicalMessage = latestTurnReferencedMessage.value ?? latestReferencedMessage.value
-  if (historicalMessage) {
-    return toHistoricalSourceItems(
-      historicalMessage.references,
-      historicalMessage.referenceNumbers,
-      historicalMessage.citedReferenceNumbers,
-    )
-  }
-
-  return normalizeSourceItems(readLatestSessionCitationSnapshot(sessionId.value))
+  return resolveDisplayedSourceItems({
+    activeCitationMessageId: activeCitationMessageId.value,
+    hasLiveReferenceState,
+    liveSourceItems: liveSourceItems.value,
+    messages: transcriptMessages.value,
+    readLatestSnapshot: readLatestSessionCitationSnapshot,
+    readSnapshot: readSessionCitationSnapshot,
+    sessionId: sessionId.value,
+  })
 })
 
 const sourceCountLabel = computed(() => {
@@ -448,12 +406,17 @@ watch(pinnedSessionIds, (ids) => {
   window.localStorage.setItem(PINNED_SESSIONS_STORAGE_KEY, JSON.stringify(ids))
 })
 
-watch(sessionId, () => {
-  activeSourceModal.value = null
-  activeCitationMessageId.value = ''
-  activeSourceReferenceNumber.value = null
-  sourceCardElements.value = {}
-})
+watch(
+  sessionId,
+  (nextSessionId, previousSessionId) => {
+    if (nextSessionId === previousSessionId) {
+      return
+    }
+
+    resetCitationUi({ closePanel: true })
+  },
+  { flush: 'sync' },
+)
 
 watch(sourceItems, (items) => {
   sourceCardElements.value = {}
@@ -637,11 +600,18 @@ function clearUnavailableChatState(): void {
   sessionId.value = ''
   sessionName.value = ''
   selectedDatasetIds.value = []
+  resetCitationUi({ closePanel: true })
+  resetChat()
+}
+
+function resetCitationUi(options: { closePanel?: boolean } = {}): void {
   activeSourceModal.value = null
   activeCitationMessageId.value = ''
   activeSourceReferenceNumber.value = null
-  citationsOpen.value = false
-  resetChat()
+  sourceCardElements.value = {}
+  if (options.closePanel) {
+    citationsOpen.value = false
+  }
 }
 
 async function createNewChat(): Promise<void> {
@@ -1115,80 +1085,6 @@ function findMatchingTranscriptMessage(
   }
 
   return null
-}
-
-function resolveActiveCitationMessageId(
-  session: RagflowSession,
-  candidateMessageId: string,
-): string {
-  const candidateIndex = parseTranscriptMessageIndex(session, candidateMessageId)
-  if (
-    candidateIndex !== null &&
-    hasDisplayableSessionReferences(session.messages[candidateIndex])
-  ) {
-    return candidateMessageId
-  }
-
-  const latestReferenceCarrier = findLatestDisplayableSessionMessage(session)
-  return latestReferenceCarrier
-    ? toTranscriptMessageId(session.biz_session_id, latestReferenceCarrier.index)
-    : ''
-}
-
-function parseTranscriptMessageIndex(
-  session: RagflowSession,
-  messageId: string,
-): number | null {
-  const prefix = `${session.biz_session_id}-`
-  if (!messageId.startsWith(prefix)) {
-    return null
-  }
-
-  const rawIndex = messageId.slice(prefix.length)
-  const index = Number(rawIndex)
-  if (!Number.isInteger(index) || index < 0 || index >= session.messages.length) {
-    return null
-  }
-
-  return index
-}
-
-function findLatestDisplayableSessionMessage(
-  session: RagflowSession,
-): { index: number } | null {
-  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
-    const message = session.messages[index]
-    if (hasDisplayableSessionReferences(message)) {
-      return { index }
-    }
-  }
-
-  return null
-}
-
-function hasDisplayableSessionReferences(
-  message: RagflowSession['messages'][number] | undefined,
-): boolean {
-  if (!message || message.role !== 'assistant' || message.references.length === 0) {
-    return false
-  }
-
-  const presentation = splitThoughtContent(message.content)
-  const answerSegments = toAnswerSegments(presentation.answer)
-  const citedReferenceNumbers = extractCitedReferenceNumbers(answerSegments)
-  if (citedReferenceNumbers.length === 0) {
-    return false
-  }
-
-  return toHistoricalSourceItems(
-    message.references,
-    resolveReferenceNumbers(answerSegments, message.references.length),
-    citedReferenceNumbers,
-  ).length > 0
-}
-
-function toTranscriptMessageId(nextSessionId: string, messageIndex: number): string {
-  return `${nextSessionId || 'session'}-${messageIndex}`
 }
 
 function contentsAreEquivalent(left: string, right: string): boolean {
