@@ -1529,3 +1529,20 @@ Update: 2026-05-18 citation source scroll transaction hardening
    - `npm.cmd run test:citation` passed.
    - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
    - Real browser check after reload: clicked one answer citation to show latest references `[3,4,5,7]`, then single-clicked citation `8` from another answer. Source Citations switched to `[0,1,3,4,5,6,8]`, `REF [8]` was active, and the source panel scrolled to `scrollTop=1421` with the active card in view.
+
+---
+
+Update: 2026-05-18 streaming answer presentation
+
+1. Added a distinct live-answer presentation for model output that is still streaming.
+   - `liveAnswerIsStreaming` is true only when the current answer is visible, the chat is still streaming, and the live message is not an error.
+   - While true, the live answer card gets a subtle streaming border/left rail, a compact `Generating answer` status pill, and a blinking text caret at the end of the partial answer.
+   - Completed historical answers keep the normal message-card styling.
+2. State behavior:
+   - Streaming-only UI is derived from existing chat state, so it disappears automatically when `isStreamingChat` becomes false.
+   - Copy actions remain hidden while streaming and return when the answer is complete.
+   - Existing citation buttons and thinking-panel behavior stay on the same state path.
+3. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - Browser state probe confirmed streaming mode shows `.live-answer-card--streaming`, `Generating answer`, and `.streaming-caret`; after setting streaming false, those elements disappear and the copy action is visible again.

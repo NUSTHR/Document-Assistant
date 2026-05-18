@@ -235,6 +235,15 @@ const isLiveThinkingOnly = computed(() => {
   )
 })
 
+const liveAnswerIsStreaming = computed(() => {
+  return (
+    isStreamingChat.value &&
+    shouldShowAnswer.value &&
+    !chatErrorMessage.value &&
+    !answerIsError.value
+  )
+})
+
 const displayedTranscriptMessages = computed<TranscriptMessage[]>(() => {
   const duplicateIds = new Set<string>()
   const liveAnswer = chatErrorMessage.value || streamedAnswer.value
@@ -1532,10 +1541,17 @@ function normalizeMessageContent(value: string): string {
             <div class="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 text-white mt-1">
               <span class="material-symbols-outlined text-[18px]" data-icon="smart_toy">smart_toy</span>
             </div>
-            <div class="max-w-[90%] bg-surface-container-lowest border border-outline-variant rounded-2xl rounded-tl-none p-stack-md shadow-sm">
+            <div
+              class="max-w-[90%] bg-surface-container-lowest border border-outline-variant rounded-2xl rounded-tl-none p-stack-md shadow-sm"
+              :class="{ 'live-answer-card live-answer-card--streaming': liveAnswerIsStreaming }"
+            >
               <div class="space-y-4">
                 <p v-if="chatErrorMessage || answerIsError" class="font-body-md text-error whitespace-pre-wrap">{{ chatErrorMessage || streamedAnswer }}</p>
                 <template v-else>
+                  <div v-if="liveAnswerIsStreaming" class="streaming-answer-status" aria-live="polite">
+                    <span class="streaming-answer-status__pulse"></span>
+                    <span>Generating answer</span>
+                  </div>
                   <div v-if="isLiveThinkingOnly" class="thinking-state">
                     <button
                       class="thought-toggle thought-toggle--streaming"
@@ -1574,6 +1590,7 @@ function normalizeMessageContent(value: string): string {
                           >{{ segment.referenceNumber }}</button>
                         </template>
                       </template>
+                      <span v-if="liveAnswerIsStreaming" class="streaming-caret" aria-hidden="true"></span>
                     </p>
                     <div v-if="!isStreamingChat" class="message-actions">
                       <button
