@@ -1450,3 +1450,82 @@ Update: 2026-05-18 engineering-quality refactor and citation-state hardening
    - `GET http://127.0.0.1:5173/health` returned `ok`.
    - `GET http://127.0.0.1:5173/api/ragflow/config` currently returns 502 because `.env` points `RAGFLOW_BASE_URL` to `http://127.0.0.1:18080`, and no service is listening on that port.
    - This blocks real RAGFlow-backed chat/session/citation end-to-end testing until RAGFlow is started again, but the frontend/backend integration route itself is active and same-origin through the frontend proxy.
+
+---
+
+Update: 2026-05-18 answer citation click scroll behavior
+
+1. Implemented immediate Source Citations focusing when a user clicks a citation number in an assistant answer.
+   - `openSourceReference` is now async and waits for Vue's DOM update plus the next animation frame after switching `activeCitationMessageId`.
+   - The source list is resolved only after the correct answer's citation set has rendered, so the scroll target is not selected from stale source cards.
+2. Added stale async-task protection.
+   - Introduced `sourceFocusSequence` to invalidate older pending focus/scroll operations when a newer citation click, session switch, or citation UI reset occurs.
+   - `resetCitationUi` increments this sequence so old clicks cannot write highlight/modal/scroll state after a session change.
+3. Preserved existing behavior.
+   - Clicking a citation number in the answer scrolls and highlights only.
+   - Clicking a Source Citations card still opens the original text modal.
+4. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
+   - Frontend restarted on `0.0.0.0:5173`; `GET http://127.0.0.1:5173` returned 200 and `/health` returned `ok`.
+   - Real RAGFlow citation click testing is still blocked until `RAGFLOW_BASE_URL=http://127.0.0.1:18080` has a running RAGFlow service again.
+
+---
+
+Update: 2026-05-18 single-click citation scroll hardening
+
+1. Fixed the reason a second click could be required before Source Citations scrolled.
+   - The first click could switch `sourceItems`, which clears `sourceCardElements`, before Vue had re-rendered and re-registered the target card ref.
+   - The second click worked only because the target DOM ref already existed by then.
+2. Engineering fix:
+   - Added `SOURCE_CARD_RENDER_WAIT_FRAMES` and `waitForSourceCardElement`.
+   - `centerSourceCard` now waits for the target source card element to be registered before computing the scroll offset.
+   - The wait loop is bounded and still guarded by `sourceFocusSequence`, so rapid repeated clicks or session switches cannot let an older scroll task mutate the current citation state.
+3. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
+   - Frontend remains reachable at `http://127.0.0.1:5173`; `/health` returned `ok`.
+
+---
+
+Update: 2026-05-18 single-click citation scroll race fix
+
+1. Revisited the remaining double-click symptom.
+   - The previous fix waited for Vue ref registration, but it did not fully handle first-click layout stabilization when Source Citations is opened from a collapsed state.
+   - Inline function refs could also receive stale `null` callbacks during re-render, clearing a target element after it had been registered.
+2. Hardened the scroll transaction:
+   - `openSourceReference` now starts a single focus transaction, clears any stale source modal, switches the active answer, opens Source Citations, then waits for a complete scroll target.
+   - A complete target means: current `sourceItems` contains the requested reference number, the source panel container exists, the matching card element exists, and both have non-zero layout height.
+   - `waitForSourceScrollTarget` retries this bounded check for 12 animation frames and is still invalidated by `sourceFocusSequence`.
+3. DOM target reliability:
+   - Source cards now carry a safe hashed `data-source-key`.
+   - `findSourceCardElement` uses the registered Vue ref first, then falls back to querying the rendered DOM by `data-source-key`.
+   - `setSourceCardElement` no longer lets non-HTMLElement/null callbacks overwrite a valid registered element.
+4. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
+   - Frontend returned 200 at `http://127.0.0.1:5173`; `/health` returned `ok`.
+
+---
+
+Update: 2026-05-18 citation source scroll transaction hardening
+
+1. Root cause confirmed with a real browser run.
+   - A single click could already switch Source Citations to the correct answer and set the active card, but the scroll write was not reliably executed against the final rendered source card.
+   - The failure reproduced as: source list changed from `[3,4,5,7]` to `[0,1,3,4,5,6,8]`, `REF [8]` became active, but `scrollTop` stayed at `0`.
+2. Frontend fix:
+   - Reworked Source Citations focusing into a bounded, cancelable scroll transaction.
+   - The transaction re-resolves the current source card DOM element before each scroll attempt instead of relying on a possibly stale first render target.
+   - `waitForNextFrame` now has a small timeout fallback so a click transaction does not hang if `requestAnimationFrame` is delayed by the browser/window state.
+   - Added pruning for cached source card elements so old session/old answer DOM refs do not remain as hidden state.
+3. State safety:
+   - `sourceFocusSequence` still invalidates older pending scroll tasks when a newer citation click, session switch, or citation reset occurs.
+   - Empty source state clears modal/highlight and cached refs; non-empty state keeps only current, attached source card refs.
+4. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
+   - Real browser check after reload: clicked one answer citation to show latest references `[3,4,5,7]`, then single-clicked citation `8` from another answer. Source Citations switched to `[0,1,3,4,5,6,8]`, `REF [8]` was active, and the source panel scrolled to `scrollTop=1421` with the active card in view.

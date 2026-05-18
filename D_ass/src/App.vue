@@ -65,10 +65,24 @@ interface AnswerPresentation {
   hasThought: boolean
 }
 
+interface SourceScrollTarget {
+  container: HTMLElement
+  element: HTMLElement
+  source: SourceItem
+}
+
+interface SourceScrollPosition {
+  top: number
+  maxTop: number
+}
+
 const PROFILE_IMAGE_URL =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDbV0EIMb7_6jlpqgIBumGrr4GpUZE_0i0TppiJtIlLBwFrjo0u4wZbHFbJ_l3rvQuplzUJrjKfzp8Kb1FHpN4PfzAGspFlJSpsMIfYkez0HKBF-gDKLpZ-ppeBKaMJLWLLx_FGh52AHmlO4dpd1CXeshfz5fL2kWbvd8DmN43MRd3n43iy24RRc8MdOlUsQRi2MBMyO6Edf5YBtQ2FRmUBGy7hBpRVIfOA1IbQQM7jTNTgq-iD9Ny8I1VdSoeh4GExy8w8uT_9_Jh2'
 
 const PINNED_SESSIONS_STORAGE_KEY = 'documentation-assistant:pinned-sessions'
+const SOURCE_CARD_RENDER_WAIT_FRAMES = 12
+const SOURCE_CARD_FRAME_TIMEOUT_MS = 50
+const SOURCE_CARD_SCROLL_ATTEMPTS = 4
 
 const {
   assistantChatId,
@@ -116,7 +130,7 @@ const availableModels = ref<RagflowModelOption[]>([])
 const pinnedSessionIds = ref<string[]>(readStringArray(PINNED_SESSIONS_STORAGE_KEY))
 const chatScrollElement = ref<HTMLElement | null>(null)
 const sourceScrollElement = ref<HTMLElement | null>(null)
-const sourceCardElements = ref<Record<string, HTMLElement | null>>({})
+const sourceCardElements = new Map<string, HTMLElement>()
 const openThoughtIds = ref<string[]>([])
 const flashedActionKey = ref<string>('')
 const sessionDialogMode = ref<SessionDialogMode | null>(null)
@@ -126,6 +140,7 @@ const isSessionActionBusy = ref<boolean>(false)
 const activeSourceModal = ref<SourceItem | null>(null)
 const activeCitationMessageId = ref<string>('')
 const activeSourceReferenceNumber = ref<number | null>(null)
+const sourceFocusSequence = ref<number>(0)
 const selectedChatId = ref<string>('')
 const selectedDatasetIds = ref<string[]>([])
 const configLlmId = ref<string>('')
@@ -419,7 +434,7 @@ watch(
 )
 
 watch(sourceItems, (items) => {
-  sourceCardElements.value = {}
+  pruneSourceCardElements(items)
   if (items.length > 0) {
     if (
       activeSourceReferenceNumber.value !== null &&
@@ -442,6 +457,7 @@ watch(sourceItems, (items) => {
 
   activeSourceModal.value = null
   activeSourceReferenceNumber.value = null
+  sourceCardElements.clear()
 })
 
 watch(
@@ -605,10 +621,11 @@ function clearUnavailableChatState(): void {
 }
 
 function resetCitationUi(options: { closePanel?: boolean } = {}): void {
+  sourceFocusSequence.value += 1
   activeSourceModal.value = null
   activeCitationMessageId.value = ''
   activeSourceReferenceNumber.value = null
-  sourceCardElements.value = {}
+  sourceCardElements.clear()
   if (options.closePanel) {
     citationsOpen.value = false
   }
@@ -813,36 +830,47 @@ function handleQuestionKeydown(event: KeyboardEvent): void {
 }
 
 function selectSource(source: SourceItem): void {
-  openSourceReference(source.referenceNumber, { openModal: true })
+  void openSourceReference(source.referenceNumber, { openModal: true })
 }
 
-function openSourceReference(
+async function openSourceReference(
   referenceNumber: number | null,
   options: { messageId?: string; openModal?: boolean } = {},
-): void {
+): Promise<void> {
   if (referenceNumber === null) {
     return
   }
 
+  const focusSequence = sourceFocusSequence.value + 1
+  sourceFocusSequence.value = focusSequence
+
+  activeSourceModal.value = null
   if (options.messageId) {
     activeCitationMessageId.value = options.messageId
   }
 
-  const source = sourceItems.value.find((item) => item.referenceNumber === referenceNumber)
-  if (!source) {
+  citationsOpen.value = true
+  activeSourceReferenceNumber.value = referenceNumber
+  await nextTick()
+  const target = await waitForSourceScrollTarget(referenceNumber, focusSequence)
+  if (focusSequence !== sourceFocusSequence.value) {
+    return
+  }
+
+  if (!target) {
     activeSourceReferenceNumber.value = null
-    activeSourceModal.value = null
-    citationsOpen.value = true
     return
   }
 
   handleReferenceSelection(referenceNumber)
   activeSourceReferenceNumber.value = referenceNumber
-  citationsOpen.value = true
   if (options.openModal) {
-    activeSourceModal.value = source
+    activeSourceModal.value = target.source
   }
-  void centerSourceCard(source)
+  const centeredTarget = await centerSourceCard(referenceNumber, focusSequence, target)
+  if (options.openModal && centeredTarget) {
+    activeSourceModal.value = centeredTarget.source
+  }
 }
 
 function closeSourceModal(): void {
@@ -861,42 +889,200 @@ function setSourceCardElement(
   source: SourceItem,
   element: Element | ComponentPublicInstance | null,
 ): void {
-  sourceCardElements.value = {
-    ...sourceCardElements.value,
-    [sourceElementKey(source)]: element instanceof HTMLElement ? element : null,
-  }
-}
-
-async function centerSourceCard(source: SourceItem): Promise<void> {
-  await nextTick()
-  await waitForNextFrame()
-  const container = sourceScrollElement.value
-  const element = sourceCardElements.value[sourceElementKey(source)]
-  if (!container || !element) {
+  if (!(element instanceof HTMLElement)) {
     return
   }
 
+  sourceCardElements.set(sourceElementKey(source), element)
+}
+
+function pruneSourceCardElements(items: SourceItem[]): void {
+  const validKeys = new Set(items.map(sourceElementKey))
+  const container = sourceScrollElement.value
+
+  for (const [key, element] of sourceCardElements.entries()) {
+    if (!validKeys.has(key) || (container && !container.contains(element))) {
+      sourceCardElements.delete(key)
+    }
+  }
+}
+
+async function centerSourceCard(
+  referenceNumber: number,
+  focusSequence: number,
+  target: SourceScrollTarget,
+): Promise<SourceScrollTarget | null> {
+  let currentTarget: SourceScrollTarget | null = target
+
+  for (let attempt = 0; attempt < SOURCE_CARD_SCROLL_ATTEMPTS; attempt += 1) {
+    if (focusSequence !== sourceFocusSequence.value) {
+      return null
+    }
+
+    currentTarget = resolveSourceScrollTarget(referenceNumber) ?? currentTarget
+    if (!currentTarget) {
+      return null
+    }
+
+    applySourceScrollPosition(currentTarget)
+    await waitForNextFrame()
+    if (focusSequence !== sourceFocusSequence.value) {
+      return null
+    }
+
+    const refreshedTarget = resolveSourceScrollTarget(referenceNumber)
+    if (refreshedTarget) {
+      currentTarget = refreshedTarget
+      if (sourceCardIsCentered(refreshedTarget)) {
+        return refreshedTarget
+      }
+    }
+  }
+
+  if (currentTarget) {
+    applySourceScrollPosition(currentTarget)
+  }
+
+  return currentTarget
+}
+
+function applySourceScrollPosition(target: SourceScrollTarget): void {
+  const { container, element } = target
+  const position = calculateSourceScrollPosition(container, element)
+  container.scrollTop = position.top
+}
+
+function calculateSourceScrollPosition(
+  container: HTMLElement,
+  element: HTMLElement,
+): SourceScrollPosition {
   const containerRect = container.getBoundingClientRect()
   const elementRect = element.getBoundingClientRect()
-  const nextScrollTop =
+  const rawTop =
     container.scrollTop +
     elementRect.top -
     containerRect.top -
     (container.clientHeight - elementRect.height) / 2
-  container.scrollTo({
-    top: Math.max(0, nextScrollTop),
-    behavior: 'smooth',
-  })
+  const maxTop = Math.max(0, container.scrollHeight - container.clientHeight)
+  const top = Math.min(maxTop, Math.max(0, rawTop))
+  return { top, maxTop }
+}
+
+function sourceCardIsCentered(target: SourceScrollTarget): boolean {
+  const { container, element } = target
+  if (!container.contains(element)) {
+    return false
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const elementRect = element.getBoundingClientRect()
+  const elementCenter = elementRect.top + elementRect.height / 2
+  return (
+    elementCenter >= containerRect.top + containerRect.height * 0.25 &&
+    elementCenter <= containerRect.bottom - containerRect.height * 0.25
+  )
 }
 
 function waitForNextFrame(): Promise<void> {
   return new Promise((resolve) => {
-    window.requestAnimationFrame(() => resolve())
+    let hasResolved = false
+    let timeoutId = 0
+
+    const resolveOnce = (): void => {
+      if (hasResolved) {
+        return
+      }
+
+      hasResolved = true
+      window.clearTimeout(timeoutId)
+      resolve()
+    }
+
+    timeoutId = window.setTimeout(resolveOnce, SOURCE_CARD_FRAME_TIMEOUT_MS)
+    window.requestAnimationFrame(resolveOnce)
   })
 }
 
+async function waitForSourceScrollTarget(
+  referenceNumber: number,
+  focusSequence: number,
+): Promise<SourceScrollTarget | null> {
+  for (let attempt = 0; attempt < SOURCE_CARD_RENDER_WAIT_FRAMES; attempt += 1) {
+    await nextTick()
+    await waitForNextFrame()
+    if (focusSequence !== sourceFocusSequence.value) {
+      return null
+    }
+
+    const target = resolveSourceScrollTarget(referenceNumber)
+    if (target) {
+      return target
+    }
+  }
+
+  return null
+}
+
+function resolveSourceScrollTarget(referenceNumber: number): SourceScrollTarget | null {
+  const source = sourceItems.value.find((item) => {
+    return item.referenceNumber === referenceNumber
+  })
+  if (!source) {
+    return null
+  }
+
+  const container = sourceScrollElement.value
+  const element = findSourceCardElement(source, container)
+  return toReadySourceScrollTarget(container, element, source)
+}
+
+function findSourceCardElement(
+  source: SourceItem,
+  container: HTMLElement | null,
+): HTMLElement | null {
+  const key = sourceElementKey(source)
+  const registeredElement = sourceCardElements.get(key)
+  if (registeredElement && container?.contains(registeredElement)) {
+    return registeredElement
+  }
+
+  return container?.querySelector<HTMLElement>(`[data-source-key="${key}"]`) ?? null
+}
+
+function toReadySourceScrollTarget(
+  container: HTMLElement | null,
+  element: HTMLElement | null | undefined,
+  source: SourceItem,
+): SourceScrollTarget | null {
+  if (!container || !element) {
+    return null
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const elementRect = element.getBoundingClientRect()
+  if (containerRect.height <= 0 || elementRect.height <= 0) {
+    return null
+  }
+
+  return {
+    container,
+    element,
+    source,
+  }
+}
+
 function sourceElementKey(source: SourceItem): string {
-  return `${source.referenceNumber}-${source.id}`
+  return `${source.referenceNumber}-${hashSourceId(source.id)}`
+}
+
+function hashSourceId(value: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return (hash >>> 0).toString(36)
 }
 
 async function copyAnswer(content: string): Promise<void> {
@@ -1220,7 +1406,7 @@ function normalizeMessageContent(value: string): string {
           <h2 class="font-headline-sm text-headline-sm font-semibold">Source Citations</h2>
           <span class="font-label-caps text-label-caps text-secondary bg-secondary-container px-2 py-1 rounded">{{ sourceCountLabel }}</span>
         </header>
-        <div ref="sourceScrollElement" class="flex-1 min-h-0 overflow-y-auto p-stack-md space-y-stack-md custom-scrollbar">
+        <div ref="sourceScrollElement" data-source-scroll="true" class="flex-1 min-h-0 overflow-y-auto p-stack-md space-y-stack-md custom-scrollbar">
           <div v-if="sourceItems.length === 0" class="flex flex-col items-center justify-center h-full text-center px-stack-lg space-y-stack-md opacity-60">
             <div class="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center text-outline mb-2">
               <span class="material-symbols-outlined text-[32px]" data-icon="find_in_page">find_in_page</span>
@@ -1236,6 +1422,7 @@ function normalizeMessageContent(value: string): string {
           <div
             v-for="source in sourceItems"
             :key="source.id"
+            :data-source-key="sourceElementKey(source)"
             :ref="(element) => setSourceCardElement(source, element)"
             class="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md hover:border-secondary transition-all cursor-pointer"
             :class="{ 'source-card--active': activeSourceReferenceNumber === source.referenceNumber }"
