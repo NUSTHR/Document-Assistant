@@ -48,6 +48,8 @@ class ReferenceResult(BaseModel):
 class ChatStreamResult(BaseModel):
     answer: str = ""
     references: list[ReferenceResult] = Field(default_factory=list)
+    biz_session_id: str | None = None
+    session_name: str | None = None
 
 
 class RagflowDatasetConfigResult(BaseModel):

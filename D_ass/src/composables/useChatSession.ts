@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 
 import { streamChat } from '../lib/integration-api'
+import { isDraftSessionId } from '../lib/session-list'
 import { toFriendlyMessage } from '../lib/workspace-errors'
 import type { ChatReference } from '../types/integration'
 
@@ -11,10 +12,11 @@ const CANCELLED_STATUS = 'Cancelled'
 
 export function useChatSession() {
   const activeChatAbortController = ref<AbortController | null>(null)
+  const activeChatRequestId = ref<number>(0)
   const assistantName = ref<string>('Standard Assistant')
   const assistantChatId = ref<string>('')
   const sessionId = ref<string>('')
-  const sessionName = ref<string>('Recent Chat 1')
+  const sessionName = ref<string>('')
   const question = ref<string>('')
   const submittedQuestion = ref<string>('')
   const streamedAnswer = ref<string>('')
@@ -65,6 +67,7 @@ export function useChatSession() {
 
   function resetChat(): void {
     activeChatAbortController.value?.abort()
+    activeChatRequestId.value += 1
     activeChatAbortController.value = null
     question.value = ''
     submittedQuestion.value = ''
@@ -86,15 +89,27 @@ export function useChatSession() {
     errorMessage.value = ''
   }
 
-  async function submitChat(): Promise<void> {
+  function isActiveChatRequest(requestId: number, controller: AbortController): boolean {
+    return (
+      activeChatRequestId.value === requestId &&
+      activeChatAbortController.value === controller
+    )
+  }
+
+  async function submitChat(): Promise<boolean> {
     if (!canSubmitChat.value) {
       errorMessage.value = assistantChatId.value.trim()
         ? 'Please enter a question.'
         : 'Select an available RAGFlow assistant before chatting.'
-      return
+      return false
     }
 
     const trimmedQuestion = question.value.trim()
+    activeChatAbortController.value?.abort()
+    const requestId = activeChatRequestId.value + 1
+    const controller = new AbortController()
+    activeChatRequestId.value = requestId
+    activeChatAbortController.value = controller
     question.value = ''
     clearError()
     wasCancelled.value = false
@@ -102,19 +117,23 @@ export function useChatSession() {
     submittedQuestion.value = trimmedQuestion
     streamedAnswer.value = ''
     streamedReferences.value = []
-    activeChatAbortController.value?.abort()
-    activeChatAbortController.value = new AbortController()
 
     try {
+      const activeSessionId = sessionId.value.trim()
       await streamChat(
         {
           assistant_name: assistantName.value.trim(),
           question: trimmedQuestion,
           biz_chat_id: assistantChatId.value.trim() || undefined,
-          biz_session_id: sessionId.value.trim() || undefined,
-          session_name: sessionName.value.trim() || undefined,
+          biz_session_id: activeSessionId && !isDraftSessionId(activeSessionId)
+            ? activeSessionId
+            : undefined,
         },
         (chunk) => {
+          if (!isActiveChatRequest(requestId, controller)) {
+            return
+          }
+
           if (chunk.error_code || chunk.error_message) {
             streamedAnswer.value = ''
             streamedReferences.value = []
@@ -125,26 +144,37 @@ export function useChatSession() {
 
           streamedAnswer.value = chunk.answer
           streamedReferences.value = chunk.references
+          if (chunk.session_name) {
+            sessionName.value = chunk.session_name
+          }
+          if (chunk.biz_session_id) {
+            sessionId.value = chunk.biz_session_id
+          }
         },
-        activeChatAbortController.value.signal,
+        controller.signal,
       )
+      return isActiveChatRequest(requestId, controller) && !controller.signal.aborted
     } catch (error: unknown) {
-      if (activeChatAbortController.value?.signal.aborted) {
-        return
+      if (controller.signal.aborted || !isActiveChatRequest(requestId, controller)) {
+        return false
       }
 
       streamedAnswer.value = ''
       streamedReferences.value = []
       errorCode.value = ''
       errorMessage.value = toFriendlyMessage(error, 'Chat streaming failed.')
+      return true
     } finally {
-      activeChatAbortController.value = null
-      isStreamingChat.value = false
+      if (isActiveChatRequest(requestId, controller)) {
+        activeChatAbortController.value = null
+        isStreamingChat.value = false
+      }
     }
   }
 
   onBeforeUnmount(() => {
     activeChatAbortController.value?.abort()
+    activeChatRequestId.value += 1
   })
 
   return {

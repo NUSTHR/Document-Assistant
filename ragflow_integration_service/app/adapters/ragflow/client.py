@@ -1,6 +1,5 @@
 import json
 from collections.abc import Iterator
-from functools import lru_cache
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -11,12 +10,21 @@ from app.core.config import get_settings
 
 
 class RagflowHttpClient:
-    def __init__(self, base_url: str, api_key: str, timeout_seconds: int) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: int,
+        api_key: str | None = None,
+        authorization: str | None = None,
+    ) -> None:
         normalized_base_url = base_url.rstrip("/")
         if normalized_base_url.endswith("/api/v1"):
             normalized_base_url = normalized_base_url[: -len("/api/v1")]
         self._base_url = normalized_base_url
-        self._api_key = api_key
+        self._authorization = self._normalize_authorization(
+            authorization=authorization,
+            api_key=api_key,
+        )
         self._timeout_seconds = timeout_seconds
 
     def get(
@@ -32,6 +40,13 @@ class RagflowHttpClient:
         json_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self._request_json("POST", path, json_body=json_body)
+
+    def post_with_headers(
+        self,
+        path: str,
+        json_body: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        return self._request_json_with_headers("POST", path, json_body=json_body)
 
     def put(
         self,
@@ -137,6 +152,25 @@ class RagflowHttpClient:
         body: bytes | None = None,
         content_type: str | None = None,
     ) -> dict[str, Any]:
+        payload, _headers = self._request_json_with_headers(
+            method=method,
+            path=path,
+            params=params,
+            json_body=json_body,
+            body=body,
+            content_type=content_type,
+        )
+        return payload
+
+    def _request_json_with_headers(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        body: bytes | None = None,
+        content_type: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, str]]:
         request_body = body
         request_content_type = content_type
         if json_body is not None:
@@ -153,6 +187,7 @@ class RagflowHttpClient:
         try:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 raw_body = response.read().decode("utf-8", errors="replace")
+                response_headers = dict(response.headers.items())
         except HTTPError as exc:
             message = exc.read().decode("utf-8", errors="replace")
             raise RagflowIntegrationError(
@@ -172,7 +207,7 @@ class RagflowHttpClient:
             raise RagflowIntegrationError(
                 str(payload.get("message") or "ragflow request failed")
             )
-        return payload
+        return payload, response_headers
 
     def _build_request(
         self,
@@ -186,20 +221,41 @@ class RagflowHttpClient:
         if params:
             url = f"{url}?{urlencode(params, doseq=True)}"
 
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Accept": "application/json",
-        }
+        headers = {"Accept": "application/json"}
+        if self._authorization:
+            headers["Authorization"] = self._authorization
         if content_type:
             headers["Content-Type"] = content_type
         return Request(url=url, data=body, headers=headers, method=method)
 
+    def _normalize_authorization(
+        self,
+        authorization: str | None,
+        api_key: str | None,
+    ) -> str:
+        raw_authorization = (authorization or "").strip()
+        if raw_authorization:
+            return (
+                raw_authorization
+                if raw_authorization.lower().startswith("bearer ")
+                else f"Bearer {raw_authorization}"
+            )
 
-@lru_cache(maxsize=1)
-def get_ragflow_client() -> RagflowHttpClient:
+        raw_api_key = (api_key or "").strip()
+        if raw_api_key:
+            return f"Bearer {raw_api_key}"
+
+        return ""
+
+
+def create_ragflow_client(
+    authorization: str | None = None,
+    use_service_api_key: bool = False,
+) -> RagflowHttpClient:
     settings = get_settings()
     return RagflowHttpClient(
         base_url=settings.ragflow_base_url,
-        api_key=settings.ragflow_api_key,
         timeout_seconds=settings.ragflow_timeout_seconds,
+        api_key=settings.ragflow_api_key if use_service_api_key else None,
+        authorization=authorization,
     )

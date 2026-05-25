@@ -3,7 +3,11 @@ import type {
   ChatReference,
   ChatRequest,
   ChatResponse,
-  CreateRagflowSessionPayload,
+  AuthConfigResponse,
+  AuthLoginPayload,
+  AuthRegisterPayload,
+  AuthSessionResponse,
+  AuthUser,
   DeleteRagflowSessionResponse,
   FileChunkPreviewResponse,
   HealthResponse,
@@ -23,6 +27,8 @@ import type {
   UploadKnowledgeFilePayload,
   UploadKnowledgeFileResponse,
 } from '../types/integration'
+import { writeAuthorization, writeAuthUser } from './auth-state'
+import { encryptRagflowPassword } from './ragflow-password'
 
 interface SseEvent {
   event: string
@@ -189,8 +195,53 @@ function parseChatResponse(value: unknown): ChatResponse {
   return {
     answer: value.answer,
     references: references.map((reference) => parseChatReference(reference)),
+    biz_session_id: parseNullableString(value.biz_session_id),
+    session_name: parseNullableString(value.session_name),
     error_code: parseNullableString(value.error_code),
     error_message: parseNullableString(value.error_message),
+  }
+}
+
+function parseAuthConfigResponse(value: unknown): AuthConfigResponse {
+  if (
+    !isRecord(value) ||
+    typeof value.register_enabled !== 'boolean' ||
+    typeof value.disable_password_login !== 'boolean'
+  ) {
+    throw new IntegrationApiError('invalid_response', 'Invalid auth config response.')
+  }
+
+  return {
+    register_enabled: value.register_enabled,
+    disable_password_login: value.disable_password_login,
+  }
+}
+
+function parseAuthUser(value: unknown): AuthUser {
+  if (!isRecord(value) || typeof value.email !== 'string') {
+    throw new IntegrationApiError('invalid_response', 'Invalid auth user response.')
+  }
+
+  return {
+    id: typeof value.id === 'string' ? value.id : '',
+    email: value.email,
+    nickname: typeof value.nickname === 'string' ? value.nickname : '',
+    avatar: typeof value.avatar === 'string' ? value.avatar : '',
+  }
+}
+
+function parseAuthSessionResponse(value: unknown): AuthSessionResponse {
+  if (
+    !isRecord(value) ||
+    typeof value.authorization !== 'string' ||
+    !isRecord(value.user)
+  ) {
+    throw new IntegrationApiError('invalid_response', 'Invalid auth response.')
+  }
+
+  return {
+    authorization: value.authorization,
+    user: parseAuthUser(value.user),
   }
 }
 
@@ -386,6 +437,65 @@ export async function getHealth(): Promise<HealthResponse> {
   return parseHealthResponse(response)
 }
 
+export async function getAuthConfig(): Promise<AuthConfigResponse> {
+  const response = await requestJson<unknown>('/api/auth/config', {
+    method: 'GET',
+  })
+  return parseAuthConfigResponse(response)
+}
+
+export async function loginWithRagflow(payload: AuthLoginPayload): Promise<AuthSessionResponse> {
+  const response = await requestJson<unknown>('/api/auth/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: payload.email,
+      password: encryptRagflowPassword(payload.password),
+    }),
+  })
+  const authSession = parseAuthSessionResponse(response)
+  writeAuthorization(authSession.authorization)
+  writeAuthUser(authSession.user)
+  return authSession
+}
+
+export async function registerWithRagflow(
+  payload: AuthRegisterPayload,
+): Promise<AuthSessionResponse> {
+  const response = await requestJson<unknown>('/api/auth/register', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: payload.email,
+      nickname: payload.nickname,
+      password: encryptRagflowPassword(payload.password),
+    }),
+  })
+  const authSession = parseAuthSessionResponse(response)
+  writeAuthorization(authSession.authorization)
+  writeAuthUser(authSession.user)
+  return authSession
+}
+
+export async function getAuthUser(): Promise<AuthUser> {
+  const response = await requestJson<unknown>('/api/auth/me', {
+    method: 'GET',
+  })
+  const user = parseAuthUser(response)
+  writeAuthUser(user)
+  return user
+}
+
+export async function logoutFromRagflow(): Promise<void> {
+  await requestJson<unknown>('/api/auth/logout', {
+    method: 'POST',
+  })
+}
+
 export async function getRagflowConfig(): Promise<RagflowConfigResponse> {
   const response = await requestJson<unknown>('/api/ragflow/config', {
     method: 'GET',
@@ -407,20 +517,6 @@ export async function listRagflowChatSessions(
     method: 'GET',
   })
   return parseListRagflowSessionsResponse(response)
-}
-
-export async function createRagflowChatSession(
-  chatId: string,
-  payload: CreateRagflowSessionPayload,
-): Promise<RagflowSession> {
-  const response = await requestJson<unknown>(`/api/ragflow/chats/${chatId}/sessions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  })
-  return parseRagflowSession(response)
 }
 
 export async function updateRagflowChatSession(

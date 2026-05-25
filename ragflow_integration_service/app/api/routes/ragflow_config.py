@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends
 from app.adapters.ragflow.config_adapter import RagflowConfigAdapter
 from app.api.dependencies import get_ragflow_config_adapter
 from app.api.schemas import (
-    CreateRagflowSessionRequest,
     DeleteRagflowSessionResponse,
     ListRagflowModelsResponse,
     ListRagflowSessionsResponse,
@@ -86,22 +85,6 @@ def list_ragflow_chat_sessions(
             for session in adapter.list_sessions(biz_chat_id)
         ],
     )
-
-
-@router.post(
-    "/chats/{biz_chat_id}/sessions",
-    response_model=RagflowSessionResponse,
-)
-def create_ragflow_chat_session(
-    biz_chat_id: str,
-    request: CreateRagflowSessionRequest,
-    adapter: RagflowConfigAdapter = Depends(get_ragflow_config_adapter),
-) -> RagflowSessionResponse:
-    result = adapter.create_session(
-        biz_chat_id=biz_chat_id,
-        name=request.name,
-    )
-    return RagflowSessionResponse(**result.model_dump())
 
 
 @router.put(

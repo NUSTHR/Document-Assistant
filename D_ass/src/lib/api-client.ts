@@ -1,9 +1,16 @@
 import { appConfig } from '../config/app-config'
 import type { IntegrationErrorKind } from '../types/integration'
+import { readAuthorization } from './auth-state'
 
 interface ErrorPayload {
   detail?: string
 }
+
+const AUTH_FREE_PATHS = new Set([
+  '/api/auth/config',
+  '/api/auth/login',
+  '/api/auth/register',
+])
 
 export class IntegrationApiError extends Error {
   readonly kind: IntegrationErrorKind
@@ -52,6 +59,10 @@ function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
 }
 
 function getFriendlyHttpMessage(statusCode: number, fallbackMessage: string): string {
+  if (statusCode === 401) {
+    return fallbackMessage || 'Please sign in to continue.'
+  }
+
   if (statusCode >= 500) {
     return fallbackMessage || 'Service is temporarily unavailable.'
   }
@@ -81,6 +92,26 @@ async function parseErrorPayload(response: Response): Promise<string> {
   }
 }
 
+function withAuthorization(path: string, init: RequestInit): RequestInit {
+  if (AUTH_FREE_PATHS.has(path)) {
+    return init
+  }
+
+  const authorization = readAuthorization()
+  if (!authorization) {
+    return init
+  }
+
+  const headers = new Headers(init.headers)
+  if (!headers.has('Authorization')) {
+    headers.set('Authorization', authorization)
+  }
+  return {
+    ...init,
+    headers,
+  }
+}
+
 export async function requestJson<TResponse>(
   path: string,
   init: RequestInit,
@@ -90,8 +121,9 @@ export async function requestJson<TResponse>(
     init.signal ? mergeAbortSignals([init.signal, timeout.signal]) : timeout.signal
 
   try {
+    const authorizedInit = withAuthorization(path, init)
     const response = await fetch(`${appConfig.integrationBaseUrl}${path}`, {
-      ...init,
+      ...authorizedInit,
       signal: mergedSignal,
     })
 
@@ -129,8 +161,9 @@ export async function requestBlob(
     init.signal ? mergeAbortSignals([init.signal, timeout.signal]) : timeout.signal
 
   try {
+    const authorizedInit = withAuthorization(path, init)
     const response = await fetch(`${appConfig.integrationBaseUrl}${path}`, {
-      ...init,
+      ...authorizedInit,
       signal: mergedSignal,
     })
 
@@ -172,8 +205,9 @@ export async function openSseStream(
     init.signal ? mergeAbortSignals([init.signal, timeout.signal]) : timeout.signal
 
   try {
+    const authorizedInit = withAuthorization(path, init)
     const response = await fetch(`${appConfig.integrationBaseUrl}${path}`, {
-      ...init,
+      ...authorizedInit,
       signal: mergedSignal,
     })
 

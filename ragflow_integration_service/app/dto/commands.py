@@ -13,7 +13,6 @@ class StreamChatCommand(BaseModel):
     question: str = Field(min_length=1)
     biz_chat_id: str | None = Field(default=None, max_length=128)
     biz_session_id: str | None = Field(default=None, max_length=128)
-    session_name: str | None = Field(default=None, max_length=128)
 
 
 class UpdateRagflowChatConfigCommand(BaseModel):

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -9,6 +9,32 @@ class HealthResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str = Field(min_length=1)
+
+
+class AuthConfigResponse(BaseModel):
+    register_enabled: bool = True
+    disable_password_login: bool = False
+
+
+class AuthLoginRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1)
+
+
+class AuthRegisterRequest(AuthLoginRequest):
+    nickname: str = Field(min_length=1, max_length=128)
+
+
+class AuthUserResponse(BaseModel):
+    id: str = ""
+    email: str = ""
+    nickname: str = ""
+    avatar: str = ""
+
+
+class AuthSessionResponse(BaseModel):
+    authorization: str
+    user: AuthUserResponse
 
 
 class UploadKnowledgeFileForm(BaseModel):
@@ -53,7 +79,13 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1)
     biz_chat_id: str | None = Field(default=None, max_length=128)
     biz_session_id: str | None = Field(default=None, max_length=128)
-    session_name: str | None = Field(default=None, max_length=128)
+
+    @field_validator("question")
+    @classmethod
+    def question_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("question must not be blank")
+        return value
 
 
 class ChatReferenceResponse(BaseModel):
@@ -67,6 +99,8 @@ class ChatReferenceResponse(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     references: list[ChatReferenceResponse] = Field(default_factory=list)
+    biz_session_id: str | None = None
+    session_name: str | None = None
     error_code: str | None = None
     error_message: str | None = None
 
@@ -125,10 +159,6 @@ class RagflowSessionResponse(BaseModel):
 
 class ListRagflowSessionsResponse(BaseModel):
     sessions: list[RagflowSessionResponse] = Field(default_factory=list)
-
-
-class CreateRagflowSessionRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
 
 
 class UpdateRagflowSessionRequest(BaseModel):

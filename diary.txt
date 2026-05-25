@@ -1546,3 +1546,151 @@ Update: 2026-05-18 streaming answer presentation
    - `npm.cmd run build` passed.
    - `npm.cmd run test:citation` passed.
    - Browser state probe confirmed streaming mode shows `.live-answer-card--streaming`, `Generating answer`, and `.streaming-caret`; after setting streaming false, those elements disappear and the copy action is visible again.
+
+---
+
+Update: 2026-05-18 RAGFlow-owned session naming and engineering review
+
+1. Session naming fix:
+   - Removed frontend-generated `Recent Chat {time}` naming from `createNewChat`.
+   - Changed `CreateRagflowSessionPayload.name` to optional and defaulted `createRagflowChatSession` to an empty payload.
+   - Changed `CreateRagflowSessionRequest.name` to optional in the backend Pydantic schema.
+   - `RagflowConfigAdapter.create_session` now sends `{}` to `POST /chats/{chat_id}/sessions` when no explicit name is provided, allowing RAGFlow to assign the session name.
+   - Removed the backend `DEFAULT_SESSION_NAME = "integration-session"` path from chat streaming. When there is no `biz_session_id`, chat streaming now creates a RAGFlow session without passing a project-owned name.
+   - Removed the frontend `sessionName = "Recent Chat 1"` default and stopped sending `session_name` during normal chat submit.
+2. Tests added:
+   - Added `tests/test_ragflow_session_creation.py` with fake RAGFlow client coverage for:
+     - config session creation omits `name` when unset;
+     - explicit user-provided names still pass through for rename/create-by-name behavior;
+     - chat streaming without an existing session creates a RAGFlow session with an empty request body and uses the returned RAGFlow session id.
+3. Engineering review by requested dimensions:
+   - Module organization: frontend still concentrates too much orchestration in `App.vue`; backend adapter separation is acceptable. Next improvement should extract chat/session/citation UI orchestration into composables.
+   - Naming/comments: new names are explicit (`createRagflowChatSession`, `normalized_session_name`, `request_body`). Existing comments are sparse but mostly not misleading.
+   - Error/boundary handling: Pydantic validates optional create name length; frontend no longer sends empty names. Backend still wraps RAGFlow errors through `RagflowIntegrationError`.
+   - Testing: citation-state tests and reference/session-creation adapter tests cover the current high-risk paths. Broader HTTP route tests are still missing.
+   - Config/environment: frontend integration base URL and backend RAGFlow base URL remain config/env-driven. No direct frontend RAGFlow calls were introduced.
+   - Dependencies/build: frontend has `package-lock.json`; backend uses bounded pyproject dependencies but lacks a lock file. Repo still has tracked runtime artifacts (`__pycache__`, `.pyc`, logs, build output), which should be cleaned in a separate repository hygiene pass.
+   - State machine flow: session creation now has a clearer split: explicit session id continues existing RAGFlow session; no session id asks RAGFlow to create and name a session; rename remains explicit user action. Citation state changes from previous work remain guarded by `sourceFocusSequence`.
+4. Verification:
+   - `rg` confirmed no remaining `Recent Chat`, `integration-session`, or `DEFAULT_SESSION_NAME` usage in `D_ass/src`, `ragflow_integration_service/app`, or tests.
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed, including the new session naming tests.
+
+---
+
+Update: 2026-05-18 new chat creation incident fix
+
+1. Root cause:
+   - New chat creation was failing because the running backend process on port 8081 was still using the old API schema where `CreateRagflowSessionRequest.name` was required.
+   - Frontend had already been changed to stop sending project-generated names, so the stale backend returned 422 for `POST /api/ragflow/chats/{chat_id}/sessions`.
+   - After restarting the backend with the current code, RAGFlow accepted an empty session-create payload and returned its own default name, `New session`.
+2. Backend hardening:
+   - `POST /api/ragflow/chats/{biz_chat_id}/sessions` now accepts an empty request body as well as `{}`.
+   - The anti-corruption adapter sends `{}` to RAGFlow when no explicit user-provided name exists, so session naming is delegated to RAGFlow.
+   - Explicit rename/create names are still supported when the user intentionally provides one.
+3. Frontend behavior:
+   - `createNewChat` calls the integration service without a generated `Recent Chat {time}` name.
+   - Normal chat submit no longer sends `session_name`, preventing accidental project-owned session naming.
+4. Verification:
+   - Direct backend `POST /api/ragflow/chats/chat_70323d27ccf03fceb6d8e485/sessions` with `{}` succeeded.
+   - Direct backend `POST` with no body succeeded.
+   - Frontend proxy `POST` through `http://127.0.0.1:5173/api/ragflow/.../sessions` succeeded.
+   - All temporary test sessions were deleted through the integration service.
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
+   - Search confirmed no remaining `Recent Chat`, `integration-session`, or `DEFAULT_SESSION_NAME` usage in frontend source, backend app code, or tests.
+
+---
+
+Update: 2026-05-18 first-question session naming
+
+1. Product decision:
+   - Stopped relying on RAGFlow's empty-session default name (`New session`) for the frontend new-chat flow.
+   - A frontend `New Chat` click now only resets the UI into an unsaved draft conversation. It does not create a RAGFlow session.
+   - The RAGFlow session is created only when the user sends the first question.
+2. Session naming rule:
+   - When no `biz_session_id` is present, `RagflowConversationAdapter` creates the RAGFlow session with `name` derived from the first user question.
+   - The name is whitespace-normalized and truncated to 100 characters in `app/adapters/ragflow/session_naming.py`.
+   - Same first question no longer causes name-based reuse of an old session; every draft chat creates a fresh RAGFlow session.
+3. Redundant code removed:
+   - Removed frontend `createRagflowChatSession` and `CreateRagflowSessionPayload`.
+   - Removed backend config-route `POST /api/ragflow/chats/{biz_chat_id}/sessions`.
+   - Removed `RagflowConfigAdapter.create_session`.
+   - Removed request-side `session_name` from chat request DTOs; session title is now derived from `question` server-side.
+4. State robustness:
+   - `ChatStreamResult` and `ChatResponse` now include sanitized `biz_session_id` and `session_name`.
+   - The first streaming event carries session metadata before answer tokens, so the frontend can bind the active draft to the created RAGFlow session instead of guessing the latest session after reloading the list.
+5. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed with new session naming tests.
+   - Real backend check: `/api/chat/complete` created a temporary session whose name matched the first question truncated to 100 characters; the temporary session was deleted through the integration service.
+   - Search confirmed no remaining `createRagflowChatSession`, `CreateRagflowSession`, `Recent Chat`, `integration-session`, or `DEFAULT_SESSION_NAME` references in frontend source, backend app code, or tests.
+
+---
+
+Update: 2026-05-18 abort-safe new chat during streaming
+
+1. Symptom:
+   - Clicking `New Chat` while the assistant was streaming could display `BodyStreamBuffer was aborted`.
+2. Root cause:
+   - `resetChat()` intentionally aborted the active stream, then immediately cleared `activeChatAbortController`.
+   - The stream rejection arrived later. Because the controller reference had already been cleared, the catch path could no longer tell that the abort was intentional and displayed the low-level browser stream error as a chat error.
+   - The older `submitCurrentQuestion()` continuation could also resume after the reset and run post-submit session loading against the new blank draft state.
+3. Frontend fix:
+   - Added `activeChatRequestId` to model each stream as a cancelable request generation.
+   - Stream chunks, catch handlers, and finally blocks now write to UI state only if their request id and controller still match the active request.
+   - `resetChat()` invalidates the current request generation before clearing chat state.
+   - `submitChat()` now returns whether the completed request should still be post-processed; `submitCurrentQuestion()` stops immediately for aborted or stale requests.
+4. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
+
+---
+
+Update: 2026-05-18 immediate session list sync after first question
+
+1. Symptom:
+   - After clicking `New Chat`, the new conversation did not appear in the left `Chat Sessions` list until the page was refreshed.
+2. Cause:
+   - `New Chat` intentionally creates only a frontend draft so it does not produce a RAGFlow `New session`.
+   - The real RAGFlow session is created on the first user question, and the stream now returns `biz_session_id` and `session_name`.
+   - The frontend updated the active chat state from that metadata but did not immediately add the new session summary to `sessions.value`, so the sidebar waited for a full reload/refetch.
+3. Frontend fix:
+   - Added `src/lib/session-list.ts` with `upsertSessionSummary`.
+   - After a chat completes successfully, `syncActiveSessionSummary()` inserts or updates the active RAGFlow session summary at the top of the local session list before the background RAGFlow session reload.
+   - The helper preserves existing session messages on update and avoids duplicate session ids.
+4. Tests:
+   - Added `npm.cmd run test:session-list` coverage for inserting a new session, updating an existing session, preserving messages, and ignoring blank ids.
+5. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `npm.cmd run test:session-list` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed.
+
+---
+
+Update: 2026-05-18 New Chat draft session placeholder
+
+1. Interaction change:
+   - Clicking `New Chat` now immediately shows a local draft session named `New session` at the top of the left `Chat Sessions` list.
+   - The draft uses a frontend-only id and is not sent to RAGFlow, so it does not create an empty persisted RAGFlow session.
+2. First-question replacement:
+   - When the user sends the first message, the chat request omits the draft id.
+   - The backend creates the real RAGFlow session with the first question as the name.
+   - The first stream metadata updates the frontend with the real `biz_session_id` and `session_name`, then replaces the local draft in the sidebar.
+3. State safeguards:
+   - `selectedSession` can now resolve the draft session while it is active.
+   - `loadSessions` preserves the active draft instead of selecting an old persisted session during background refresh.
+   - Draft sessions are not pin/rename/delete backend targets; the menu is hidden until the item has a real RAGFlow session id.
+   - `useChatSession` filters the draft id so it is never sent as `biz_session_id`.
+4. Tests:
+   - Extended `test-session-list` to cover draft id/name creation and draft id detection.
+5. Verification:
+   - `npm.cmd run build` passed.
+   - `npm.cmd run test:citation` passed.
+   - `npm.cmd run test:session-list` passed.
+   - `.venv\Scripts\python tests\run_reference_alignment.py` passed.

@@ -1,0 +1,9 @@
+INFO:     127.0.0.1:58841 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58842 - "GET /api/ragflow/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56769 - "GET /api/ragflow/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56772 - "GET /api/ragflow/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56774 - "GET /api/ragflow/chats/chat_f2c6204c78edb161a7eb8c83/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54693 - "POST /api/chat HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52160 - "GET /api/ragflow/chats/chat_f2c6204c78edb161a7eb8c83/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64572 - "POST /api/chat HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57990 - "GET /api/ragflow/chats/chat_f2c6204c78edb161a7eb8c83/sessions HTTP/1.1" 200 OK

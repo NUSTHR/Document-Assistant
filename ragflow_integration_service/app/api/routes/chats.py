@@ -45,7 +45,6 @@ def generate_chat_events(
                 question=request.question,
                 biz_chat_id=request.biz_chat_id,
                 biz_session_id=request.biz_session_id,
-                session_name=request.session_name,
             )
         ):
             payload = ChatResponse(
@@ -54,6 +53,8 @@ def generate_chat_events(
                     ChatReferenceResponse(**reference.model_dump())
                     for reference in result.references
                 ],
+                biz_session_id=result.biz_session_id,
+                session_name=result.session_name,
             ).model_dump()
             yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
     except RagflowIntegrationError as exc:
@@ -107,7 +108,6 @@ def complete_chat(
                 question=request.question,
                 biz_chat_id=request.biz_chat_id,
                 biz_session_id=request.biz_session_id,
-                session_name=request.session_name,
             )
         ):
             latest_response = ChatResponse(
@@ -116,6 +116,8 @@ def complete_chat(
                     ChatReferenceResponse(**reference.model_dump())
                     for reference in result.references
                 ],
+                biz_session_id=result.biz_session_id,
+                session_name=result.session_name,
             )
         return latest_response
     except RagflowIntegrationError as exc:

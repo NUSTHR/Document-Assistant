@@ -9,7 +9,9 @@ def make_biz_id(kind: str, raw_id: str) -> str:
     normalized_id = raw_id.strip()
     if not normalized_id:
         return ""
-    secret = get_settings().ragflow_api_key.encode("utf-8")
+    settings = get_settings()
+    secret_value = settings.ragflow_identity_secret or settings.ragflow_api_key
+    secret = secret_value.encode("utf-8")
     digest = hmac.new(
         secret,
         f"{kind}:{normalized_id}".encode("utf-8"),

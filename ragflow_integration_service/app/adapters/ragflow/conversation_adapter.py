@@ -8,7 +8,7 @@ from app.adapters.ragflow.anti_corruption import (
 from app.adapters.ragflow.client import RagflowHttpClient
 from app.adapters.ragflow.exceptions import RagflowIntegrationError
 from app.adapters.ragflow.identity import make_biz_id, resolve_raw_id
-from app.core.constants import DEFAULT_SESSION_NAME
+from app.adapters.ragflow.session_naming import session_name_from_question
 from app.dto.commands import StreamChatCommand
 from app.dto.results import ChatStreamResult
 from app.ports.conversation import ConversationPort
@@ -29,11 +29,15 @@ class RagflowConversationAdapter(ConversationPort):
             session = self._get_or_create_session(
                 chat_id=chat_id,
                 session_id=command.biz_session_id,
-                session_name=command.session_name or DEFAULT_SESSION_NAME,
+                question=command.question,
             )
             session_id = str(session.get("id") or "")
             if not session_id:
                 raise RagflowIntegrationError("chat session response was empty")
+            biz_session_id = make_biz_id("session", session_id)
+            session_name = str(
+                session.get("name") or session_name_from_question(command.question)
+            )
             accumulated_answer = ""
             latest_references = []
             completion_messages = [
@@ -43,6 +47,11 @@ class RagflowConversationAdapter(ConversationPort):
                     "content": command.question,
                 },
             ]
+
+            yield ChatStreamResult(
+                biz_session_id=biz_session_id,
+                session_name=session_name,
+            )
 
             for event_payload in self._client.stream_post(
                 "/chat/completions",
@@ -81,6 +90,8 @@ class RagflowConversationAdapter(ConversationPort):
                 yield ChatStreamResult(
                     answer=clean_model_answer(accumulated_answer),
                     references=latest_references,
+                    biz_session_id=biz_session_id,
+                    session_name=session_name,
                 )
         except RagflowIntegrationError:
             raise
@@ -174,7 +185,7 @@ class RagflowConversationAdapter(ConversationPort):
         self,
         chat_id: str,
         session_id: str | None,
-        session_name: str,
+        question: str,
     ) -> dict[str, Any]:
         if session_id:
             sessions = self._list_sessions(chat_id=chat_id, session_id=session_id)
@@ -184,26 +195,19 @@ class RagflowConversationAdapter(ConversationPort):
                 )
             return sessions[0]
 
-        sessions = self._list_sessions(chat_id=chat_id, session_name=session_name)
-        if sessions:
-            return sessions[0]
-
         payload = self._client.post(
             f"/chats/{chat_id}/sessions",
-            json_body={"name": session_name},
+            json_body={"name": session_name_from_question(question)},
         )
         session = payload.get("data")
         if not isinstance(session, dict):
-            raise RagflowIntegrationError(
-                f"failed to create chat session '{session_name}'"
-            )
+            raise RagflowIntegrationError("failed to create chat session")
         return session
 
     def _list_sessions(
         self,
         chat_id: str,
         session_id: str | None = None,
-        session_name: str | None = None,
     ) -> list[dict[str, Any]]:
         payload = self._client.get(
             f"/chats/{chat_id}/sessions",
@@ -220,12 +224,6 @@ class RagflowConversationAdapter(ConversationPort):
                 session
                 for session in sessions
                 if make_biz_id("session", str(session.get("id") or "")) == session_id
-            ]
-        if session_name:
-            sessions = [
-                session
-                for session in sessions
-                if str(session.get("name") or "") == session_name
             ]
         return sessions
 

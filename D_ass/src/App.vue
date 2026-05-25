@@ -1,35 +1,57 @@
-<script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
+﻿<script setup lang="ts">
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
+import AppSidebar from './components/AppSidebar.vue'
+import AuthPanel from './components/AuthPanel.vue'
+import ChatMessageList from './components/ChatMessageList.vue'
+import KnowledgeDialog from './components/KnowledgeDialog.vue'
+import MobileNavigation from './components/MobileNavigation.vue'
+import MobileTopBar from './components/MobileTopBar.vue'
+import SessionDialog from './components/SessionDialog.vue'
+import SettingsDialog from './components/SettingsDialog.vue'
+import SourceModal from './components/SourceModal.vue'
 import { useRagWorkspace } from './composables/useRagWorkspace'
+import { useRagflowConfiguration, type ModelOption } from './composables/useRagflowConfiguration'
 import { useSessionCitationSnapshots } from './composables/useSessionCitationSnapshots'
+import { useSourceReferences } from './composables/useSourceReferences'
 import {
-  createRagflowChatSession,
   deleteRagflowChatSession,
+  getAuthConfig,
+  getAuthUser,
   getRagflowConfig,
-  listRagflowModels,
   listRagflowChatSessions,
-  updateRagflowChatSession,
+  loginWithRagflow,
+  logoutFromRagflow,
+  registerWithRagflow,
   updateRagflowChatConfig,
+  updateRagflowChatSession,
 } from './lib/integration-api'
+import {
+  clearAuthorization,
+  readAuthUser,
+  readAuthorization,
+} from './lib/auth-state'
 import { toFriendlyMessage } from './lib/workspace-errors'
 import { toAnswerSegments } from './lib/workspace-presenters'
 import {
   extractCitedReferenceNumbers,
   resolveReferenceNumbers,
-  toLiveSourceItems,
-  type SourceItem,
 } from './lib/citation-sources'
 import {
-  resolveDisplayedSourceItems,
   resolveActiveCitationMessageId,
 } from './lib/citation-state'
+import {
+  createDraftSession,
+  DRAFT_SESSION_ID,
+  isDraftSessionId,
+  upsertSessionSummary,
+} from './lib/session-list'
 import type {
   ChatReference,
-  RagflowChatConfig,
-  RagflowDatasetConfig,
-  RagflowModelOption,
+  AuthConfigResponse,
+  AuthUser,
   RagflowSession,
+  UpdateRagflowChatConfigPayload,
 } from './types/integration'
 import type { AnswerSegment } from './types/workspace'
 
@@ -37,6 +59,7 @@ interface SessionItem {
   id: string
   name: string
   isPinned: boolean
+  isDraft: boolean
 }
 
 interface TranscriptMessage {
@@ -52,12 +75,8 @@ interface TranscriptMessage {
   answerSegments: AnswerSegment[]
 }
 
-interface ModelOption {
-  label: string
-  value: string
-}
-
 type SessionDialogMode = 'rename' | 'delete'
+type AuthMode = 'login' | 'register'
 
 interface AnswerPresentation {
   answer: string
@@ -65,24 +84,22 @@ interface AnswerPresentation {
   hasThought: boolean
 }
 
-interface SourceScrollTarget {
-  container: HTMLElement
-  element: HTMLElement
-  source: SourceItem
-}
-
-interface SourceScrollPosition {
-  top: number
-  maxTop: number
+interface AssistantTuningDraft {
+  llmId: string
+  similarityThreshold: number
+  vectorSimilarityWeight: number
+  topK: number
+  topN: number
+  rerankId: string
+  promptSystem: string
+  emptyResponse: string
+  quote: boolean
 }
 
 const PROFILE_IMAGE_URL =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDbV0EIMb7_6jlpqgIBumGrr4GpUZE_0i0TppiJtIlLBwFrjo0u4wZbHFbJ_l3rvQuplzUJrjKfzp8Kb1FHpN4PfzAGspFlJSpsMIfYkez0HKBF-gDKLpZ-ppeBKaMJLWLLx_FGh52AHmlO4dpd1CXeshfz5fL2kWbvd8DmN43MRd3n43iy24RRc8MdOlUsQRi2MBMyO6Edf5YBtQ2FRmUBGy7hBpRVIfOA1IbQQM7jTNTgq-iD9Ny8I1VdSoeh4GExy8w8uT_9_Jh2'
 
 const PINNED_SESSIONS_STORAGE_KEY = 'documentation-assistant:pinned-sessions'
-const SOURCE_CARD_RENDER_WAIT_FRAMES = 12
-const SOURCE_CARD_FRAME_TIMEOUT_MS = 50
-const SOURCE_CARD_SCROLL_ATTEMPTS = 4
 
 const {
   assistantChatId,
@@ -113,44 +130,86 @@ const {
   writeSnapshot: writeSessionCitationSnapshot,
 } = useSessionCitationSnapshots()
 
-const citationsOpen = ref<boolean>(false)
 const modelOpen = ref<boolean>(false)
 const openSessionMenuId = ref<string>('')
 const isKnowledgeOpen = ref<boolean>(false)
 const isSettingsOpen = ref<boolean>(false)
-const isLoadingConfig = ref<boolean>(false)
 const isLoadingSessions = ref<boolean>(false)
+const isApplyingConfigSelection = ref<boolean>(false)
 const isRecoveringChatSelection = ref<boolean>(false)
-const isSavingConfig = ref<boolean>(false)
-const configErrorMessage = ref<string>('')
-const datasets = ref<RagflowDatasetConfig[]>([])
-const chats = ref<RagflowChatConfig[]>([])
 const sessions = ref<RagflowSession[]>([])
-const availableModels = ref<RagflowModelOption[]>([])
+const draftSession = ref<RagflowSession | null>(null)
 const pinnedSessionIds = ref<string[]>(readStringArray(PINNED_SESSIONS_STORAGE_KEY))
 const chatScrollElement = ref<HTMLElement | null>(null)
-const sourceScrollElement = ref<HTMLElement | null>(null)
-const sourceCardElements = new Map<string, HTMLElement>()
 const openThoughtIds = ref<string[]>([])
 const flashedActionKey = ref<string>('')
 const sessionDialogMode = ref<SessionDialogMode | null>(null)
 const pendingSessionItem = ref<SessionItem | null>(null)
 const pendingSessionName = ref<string>('')
 const isSessionActionBusy = ref<boolean>(false)
-const activeSourceModal = ref<SourceItem | null>(null)
-const activeCitationMessageId = ref<string>('')
-const activeSourceReferenceNumber = ref<number | null>(null)
-const sourceFocusSequence = ref<number>(0)
-const selectedChatId = ref<string>('')
-const selectedDatasetIds = ref<string[]>([])
-const configLlmId = ref<string>('')
+const isAuthenticated = ref<boolean>(readAuthorization().trim().length > 0)
+const authUser = ref<AuthUser | null>(readAuthUser())
+const authMode = ref<AuthMode>('login')
+const authEmail = ref<string>('')
+const authPassword = ref<string>('')
+const authNickname = ref<string>('')
+const authErrorMessage = ref<string>('')
+const isAuthBusy = ref<boolean>(false)
+const authConfig = ref<AuthConfigResponse>({
+  register_enabled: true,
+  disable_password_login: false,
+})
+const assistantTuningDraft = ref<AssistantTuningDraft>(createEmptyAssistantTuningDraft())
 
-const selectedChat = computed(() => {
-  return chats.value.find((chat) => chat.biz_chat_id === selectedChatId.value) ?? null
+const {
+  applyConfig,
+  chats,
+  configErrorMessage,
+  configLlmId,
+  datasets,
+  fetchConfig,
+  hasAvailableChat,
+  isLoadingConfig,
+  isSavingConfig,
+  loadModels,
+  modelOptions,
+  resetConfigState,
+  saveKnowledgeConfig: persistKnowledgeConfig,
+  saveModelConfig: persistModelConfig,
+  selectedChat,
+  selectedChatId,
+  selectedDatasetIds,
+  toggleDataset,
+} = useRagflowConfiguration()
+
+const profileName = computed(() => {
+  return authUser.value?.nickname || authUser.value?.email || 'RAGFlow User'
 })
 
-const hasAvailableChat = computed(() => {
-  return chats.value.length > 0 && selectedChat.value !== null
+const profileSubtitle = computed(() => {
+  return authUser.value?.email || healthStatus.value
+})
+
+const authTitle = computed(() => {
+  return authMode.value === 'login' ? 'Sign in' : 'Create account'
+})
+
+const authSubmitLabel = computed(() => {
+  if (isAuthBusy.value) {
+    return authMode.value === 'login' ? 'Signing in...' : 'Creating...'
+  }
+  return authMode.value === 'login' ? 'Sign in' : 'Register'
+})
+
+const canSubmitAuth = computed(() => {
+  const hasRequiredFields =
+    authEmail.value.trim().length > 0 &&
+    authPassword.value.length > 0 &&
+    (
+      authMode.value === 'login' ||
+      authNickname.value.trim().length > 0
+    )
+  return hasRequiredFields && !isAuthBusy.value && !authConfig.value.disable_password_login
 })
 
 const selectedSession = computed(() => {
@@ -158,19 +217,38 @@ const selectedSession = computed(() => {
     return null
   }
 
+  if (isDraftSessionId(sessionId.value)) {
+    return draftSession.value
+  }
+
   return sessions.value.find((session) => session.biz_session_id === sessionId.value) ?? null
 })
 
 const sessionItems = computed<SessionItem[]>(() => {
-  return sessions.value
+  const persistedSessionItems = sessions.value
     .map((session) => {
       return {
         id: session.biz_session_id,
         name: session.name,
         isPinned: pinnedSessionIds.value.includes(session.biz_session_id),
+        isDraft: false,
       }
     })
     .sort((left, right) => Number(right.isPinned) - Number(left.isPinned))
+
+  if (!draftSession.value) {
+    return persistedSessionItems
+  }
+
+  return [
+    {
+      id: draftSession.value.biz_session_id,
+      name: draftSession.value.name,
+      isPinned: false,
+      isDraft: true,
+    },
+    ...persistedSessionItems,
+  ]
 })
 
 const transcriptMessages = computed<TranscriptMessage[]>(() => {
@@ -209,22 +287,6 @@ const liveAnswerPresentation = computed<AnswerPresentation>(() => {
 
 const liveAnswerSegments = computed(() => {
   return toAnswerSegments(liveAnswerPresentation.value.answer)
-})
-
-const liveReferenceNumbers = computed(() => {
-  return resolveReferenceNumbers(liveAnswerSegments.value, referenceCards.value.length)
-})
-
-const liveCitedReferenceNumbers = computed(() => {
-  return extractCitedReferenceNumbers(liveAnswerSegments.value)
-})
-
-const liveSourceItems = computed<SourceItem[]>(() => {
-  return toLiveSourceItems(
-    referenceCards.value,
-    liveReferenceNumbers.value,
-    liveCitedReferenceNumbers.value,
-  )
 })
 
 const isLiveThinkingOnly = computed(() => {
@@ -280,6 +342,36 @@ const displayedTranscriptMessages = computed<TranscriptMessage[]>(() => {
   return transcriptMessages.value.filter((message) => !duplicateIds.has(message.id))
 })
 
+const {
+  activeCitationMessageId,
+  activeSourceModal,
+  activeSourceModalPreview,
+  activeSourceReferenceNumber,
+  citationsOpen,
+  closeSourceModal,
+  liveSourceItems,
+  openSourceReference,
+  resetCitationUi,
+  selectSource,
+  setSourceCardElement,
+  setSourceScrollElement,
+  sourceCountLabel,
+  sourceElementKey,
+  sourceItems,
+  storeSessionCitationSnapshot,
+} = useSourceReferences({
+  handleReferenceSelection,
+  isStreamingChat,
+  liveAnswerSegments,
+  messages: transcriptMessages,
+  readLatestSnapshot: readLatestSessionCitationSnapshot,
+  readSnapshot: readSessionCitationSnapshot,
+  referenceCards,
+  sessionId,
+  streamedAnswer,
+  submittedQuestion,
+  writeSnapshot: writeSessionCitationSnapshot,
+})
 const answerIsError = computed(() => {
   return streamedAnswer.value.startsWith('ERROR:')
 })
@@ -304,31 +396,6 @@ const sessionDialogSubtitle = computed(() => {
   return 'Update the conversation label shown in Chat Sessions.'
 })
 
-const sourceItems = computed<SourceItem[]>(() => {
-  const hasLiveReferenceState =
-    referenceCards.value.length > 0 &&
-    liveCitedReferenceNumbers.value.length > 0 &&
-    (
-      isStreamingChat.value ||
-      submittedQuestion.value.length > 0 ||
-      streamedAnswer.value.length > 0
-    )
-
-  return resolveDisplayedSourceItems({
-    activeCitationMessageId: activeCitationMessageId.value,
-    hasLiveReferenceState,
-    liveSourceItems: liveSourceItems.value,
-    messages: transcriptMessages.value,
-    readLatestSnapshot: readLatestSessionCitationSnapshot,
-    readSnapshot: readSessionCitationSnapshot,
-    sessionId: sessionId.value,
-  })
-})
-
-const sourceCountLabel = computed(() => {
-  return `${sourceItems.value.length} SOURCES FOUND`
-})
-
 const chatAvailabilityMessage = computed(() => {
   if (isLoadingConfig.value) {
     return ''
@@ -343,14 +410,6 @@ const chatAvailabilityMessage = computed(() => {
   }
 
   return ''
-})
-
-const activeSourceModalPreview = computed(() => {
-  if (!activeSourceModal.value) {
-    return ''
-  }
-
-  return activeSourceModal.value.fullContent.trim()
 })
 
 const chatTitle = computed(() => {
@@ -372,38 +431,12 @@ const chatInputPlaceholder = computed(() => {
   return chatAvailabilityMessage.value || 'Ask follow-up questions about market research...'
 })
 
-const modelOptions = computed<ModelOption[]>(() => {
-  const options: ModelOption[] = []
-  const seenValues = new Set<string>()
-  const addOption = (label: string, value: string): void => {
-    const normalizedValue = value.trim()
-    if (!normalizedValue || seenValues.has(normalizedValue)) {
-      return
-    }
-
-    seenValues.add(normalizedValue)
-    options.push({
-      label: label.trim() || normalizedValue,
-      value: normalizedValue,
-    })
-  }
-
-  addOption(configLlmId.value, configLlmId.value)
-  for (const model of availableModels.value) {
-    addOption(model.label, model.model_id)
-  }
-  for (const chat of chats.value) {
-    addOption(chat.llm_id, chat.llm_id)
-  }
-
-  return options
-})
-
 watch(selectedChat, (chat) => {
   if (!chat) {
     assistantChatId.value = ''
     assistantName.value = ''
     selectedDatasetIds.value = []
+    draftSession.value = null
     return
   }
 
@@ -411,6 +444,8 @@ watch(selectedChat, (chat) => {
   assistantName.value = chat.name
   selectedDatasetIds.value = [...chat.biz_knowledge_base_ids]
   configLlmId.value = chat.llm_id
+  assistantTuningDraft.value = toAssistantTuningDraft(chat)
+  draftSession.value = null
 })
 
 watch(selectedChatId, async (nextChatId, previousChatId) => {
@@ -418,11 +453,18 @@ watch(selectedChatId, async (nextChatId, previousChatId) => {
     !nextChatId ||
     nextChatId === previousChatId ||
     isLoadingConfig.value ||
+    isApplyingConfigSelection.value ||
     isRecoveringChatSelection.value
   ) {
     return
   }
 
+  sessions.value = []
+  draftSession.value = null
+  sessionId.value = ''
+  sessionName.value = ''
+  resetCitationUi({ closePanel: true })
+  resetChat()
   await loadSessions(nextChatId)
 })
 
@@ -442,31 +484,10 @@ watch(
   { flush: 'sync' },
 )
 
-watch(sourceItems, (items) => {
-  pruneSourceCardElements(items)
-  if (items.length > 0) {
-    if (
-      activeSourceReferenceNumber.value !== null &&
-      !items.some((item) => item.referenceNumber === activeSourceReferenceNumber.value)
-    ) {
-      activeSourceReferenceNumber.value = null
-    }
-    const activeModal = activeSourceModal.value
-    if (activeModal) {
-      const modalIsStillVisible = items.some((item) => {
-        return sourceElementKey(item) === sourceElementKey(activeModal)
-      })
-      if (!modalIsStillVisible) {
-        activeSourceModal.value = null
-      }
-    }
-    citationsOpen.value = true
-    return
+watch([sessionId, sessionName], () => {
+  if (draftSession.value && sessionId.value && !isDraftSessionId(sessionId.value)) {
+    syncActiveSessionSummary()
   }
-
-  activeSourceModal.value = null
-  activeSourceReferenceNumber.value = null
-  sourceCardElements.clear()
 })
 
 watch(
@@ -478,48 +499,124 @@ watch(
 )
 
 onMounted(() => {
-  void loadConfig()
+  void initializeAuth()
 })
 
-async function loadConfig(): Promise<void> {
-  configErrorMessage.value = ''
-  isLoadingConfig.value = true
+async function initializeAuth(): Promise<void> {
+  await loadAuthConfig()
+  if (!readAuthorization().trim()) {
+    isAuthenticated.value = false
+    return
+  }
 
   try {
-    const config = await getRagflowConfig()
-    datasets.value = config.datasets
-    chats.value = config.chats
-    await loadModels()
-    const currentChat =
-      config.chats.find((chat) => chat.biz_chat_id === selectedChatId.value) ??
-      config.chats.find((chat) => chat.name === assistantName.value) ??
-      config.chats[0] ??
-      null
-    if (currentChat) {
-      selectedChatId.value = currentChat.biz_chat_id
-      assistantChatId.value = currentChat.biz_chat_id
-      assistantName.value = currentChat.name
-      await loadSessions(currentChat.biz_chat_id)
-    } else {
-      selectedChatId.value = ''
-      clearUnavailableChatState()
-      configErrorMessage.value =
-        'No RAGFlow chat assistant is available. Create one in RAGFlow, then refresh config.'
-    }
+    authUser.value = await getAuthUser()
+    isAuthenticated.value = true
+    await loadConfig()
   } catch (error: unknown) {
-    configErrorMessage.value = toFriendlyMessage(error, 'Failed to load RAGFlow config.')
-  } finally {
-    isLoadingConfig.value = false
+    clearAuthorization()
+    isAuthenticated.value = false
+    authUser.value = null
+    authErrorMessage.value = toFriendlyMessage(error, 'Please sign in again.')
   }
 }
 
-async function loadModels(): Promise<void> {
+async function loadAuthConfig(): Promise<void> {
   try {
-    const response = await listRagflowModels()
-    availableModels.value = response.models
+    authConfig.value = await getAuthConfig()
+    if (!authConfig.value.register_enabled && authMode.value === 'register') {
+      authMode.value = 'login'
+    }
+  } catch {
+    authConfig.value = {
+      register_enabled: true,
+      disable_password_login: false,
+    }
+  }
+}
+
+function switchAuthMode(nextMode: AuthMode): void {
+  authMode.value = nextMode
+  authErrorMessage.value = ''
+}
+
+async function submitAuth(): Promise<void> {
+  if (!canSubmitAuth.value) {
+    return
+  }
+
+  authErrorMessage.value = ''
+  isAuthBusy.value = true
+
+  try {
+    const session = authMode.value === 'login'
+      ? await loginWithRagflow({
+        email: authEmail.value.trim(),
+        password: authPassword.value,
+      })
+      : await registerWithRagflow({
+        email: authEmail.value.trim(),
+        nickname: authNickname.value.trim(),
+        password: authPassword.value,
+      })
+    authUser.value = session.user
+    isAuthenticated.value = true
+    authPassword.value = ''
+    resetWorkspaceForAuthChange()
+    await loadConfig()
+    void checkHealth()
   } catch (error: unknown) {
-    availableModels.value = []
-    configErrorMessage.value = toFriendlyMessage(error, 'Failed to load RAGFlow models.')
+    authErrorMessage.value = toFriendlyMessage(error, 'Authentication failed.')
+  } finally {
+    isAuthBusy.value = false
+  }
+}
+
+async function signOut(): Promise<void> {
+  try {
+    await logoutFromRagflow()
+  } catch {
+    // Local sign-out should still clear the browser session if RAGFlow is unreachable.
+  }
+  clearAuthorization()
+  isAuthenticated.value = false
+  authUser.value = null
+  authPassword.value = ''
+  resetWorkspaceForAuthChange()
+}
+
+function resetWorkspaceForAuthChange(): void {
+  isKnowledgeOpen.value = false
+  isSettingsOpen.value = false
+  citationsOpen.value = false
+  sessions.value = []
+  resetConfigState()
+  clearUnavailableChatState()
+}
+
+async function loadConfig(): Promise<void> {
+  if (!isAuthenticated.value) {
+    configErrorMessage.value = 'Please sign in to load RAGFlow config.'
+    return
+  }
+
+  const config = await fetchConfig()
+  if (!config) {
+    return
+  }
+
+  const currentChat =
+    config.chats.find((chat) => chat.biz_chat_id === selectedChatId.value) ??
+    config.chats.find((chat) => chat.name === assistantName.value) ??
+    config.chats[0] ??
+    null
+  if (currentChat) {
+    await applyChatSelection(currentChat.biz_chat_id, currentChat.name)
+  } else {
+    selectedChatId.value = ''
+    clearUnavailableChatState()
+    configErrorMessage.value =
+      'No RAGFlow chat assistant is available. Create one in RAGFlow, then refresh config.'
   }
 }
 
@@ -533,6 +630,10 @@ async function loadSessions(
   try {
     const response = await listRagflowChatSessions(chatId)
     sessions.value = response.sessions
+    if (isDraftSessionId(sessionId.value) && draftSession.value) {
+      return
+    }
+
     const activeSession =
       response.sessions.find((session) => session.biz_session_id === sessionId.value) ??
       response.sessions[0] ??
@@ -552,10 +653,10 @@ async function loadSessions(
   } catch (error: unknown) {
     const errorMessage = toFriendlyMessage(error, 'Failed to load RAGFlow sessions.')
     sessions.value = []
+    draftSession.value = null
     sessionId.value = ''
     sessionName.value = ''
-    activeCitationMessageId.value = ''
-    activeSourceReferenceNumber.value = null
+    resetCitationUi({ closePanel: true })
     resetChat()
     if (
       (options.recoverUnavailableChat ?? true) &&
@@ -576,8 +677,7 @@ async function recoverUnavailableChatSelection(fallbackMessage: string): Promise
   isRecoveringChatSelection.value = true
   try {
     const config = await getRagflowConfig()
-    datasets.value = config.datasets
-    chats.value = config.chats
+    applyConfig(config)
     await loadModels()
 
     const replacementChat = config.chats[0] ?? null
@@ -589,10 +689,9 @@ async function recoverUnavailableChatSelection(fallbackMessage: string): Promise
       return
     }
 
-    selectedChatId.value = replacementChat.biz_chat_id
-    assistantChatId.value = replacementChat.biz_chat_id
-    assistantName.value = replacementChat.name
-    await loadSessions(replacementChat.biz_chat_id, { recoverUnavailableChat: false })
+    await applyChatSelection(replacementChat.biz_chat_id, replacementChat.name, {
+      recoverUnavailableChat: false,
+    })
   } catch {
     selectedChatId.value = ''
     clearUnavailableChatState()
@@ -622,27 +721,20 @@ function clearUnavailableChatState(): void {
   assistantChatId.value = ''
   assistantName.value = ''
   sessions.value = []
+  draftSession.value = null
   sessionId.value = ''
   sessionName.value = ''
   selectedDatasetIds.value = []
+  configLlmId.value = ''
+  assistantTuningDraft.value = createEmptyAssistantTuningDraft()
   resetCitationUi({ closePanel: true })
   resetChat()
 }
 
-function resetCitationUi(options: { closePanel?: boolean } = {}): void {
-  sourceFocusSequence.value += 1
-  activeSourceModal.value = null
-  activeCitationMessageId.value = ''
-  activeSourceReferenceNumber.value = null
-  sourceCardElements.clear()
-  if (options.closePanel) {
-    citationsOpen.value = false
-  }
-}
-
-async function createNewChat(): Promise<void> {
+function createNewChat(): void {
   resetChat()
   citationsOpen.value = false
+  resetCitationUi({ closePanel: true })
   if (!selectedChatId.value) {
     sessionId.value = ''
     sessionName.value = ''
@@ -650,27 +742,18 @@ async function createNewChat(): Promise<void> {
     return
   }
 
-  const nextName = `Recent Chat ${new Intl.DateTimeFormat('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(new Date())}`
-
-  try {
-    const createdSession = await createRagflowChatSession(selectedChatId.value, {
-      name: nextName,
-    })
-    sessionId.value = createdSession.biz_session_id
-    sessionName.value = createdSession.name
-    await loadSessions(selectedChatId.value)
-  } catch (error: unknown) {
-    configErrorMessage.value = toFriendlyMessage(error, 'Failed to create RAGFlow session.')
-  }
+  draftSession.value = createDraftSession(selectedChatId.value)
+  sessionId.value = DRAFT_SESSION_ID
+  sessionName.value = draftSession.value.name
+  configErrorMessage.value = ''
 }
 
 function selectSession(item: SessionItem): void {
   openSessionMenuId.value = ''
   resetChat()
+  if (!item.isDraft) {
+    draftSession.value = null
+  }
   sessionId.value = item.id
   sessionName.value = item.name
   void scrollChatToBottom()
@@ -685,7 +768,10 @@ async function submitCurrentQuestion(): Promise<void> {
 
   const currentQuestion = question.value.trim()
   activeSourceReferenceNumber.value = null
-  await submitChat()
+  const shouldProcessCompletedChat = await submitChat()
+  if (!shouldProcessCompletedChat) {
+    return
+  }
 
   if (chatErrorMessage.value) {
     if (isUnavailableChatError(chatErrorMessage.value, chatErrorCode.value)) {
@@ -696,6 +782,7 @@ async function submitCurrentQuestion(): Promise<void> {
 
   const completedAnswer = streamedAnswer.value
   const completedQuestion = submittedQuestion.value || currentQuestion
+  syncActiveSessionSummary()
   if (selectedChatId.value) {
     await loadSessions(selectedChatId.value)
   }
@@ -722,6 +809,19 @@ async function submitCurrentQuestion(): Promise<void> {
     }
     clearTransientAnswer({ keepReferences: !currentAnswerHasPersistedReferences })
   }
+}
+
+function syncActiveSessionSummary(): void {
+  if (!selectedChatId.value || !sessionId.value || isDraftSessionId(sessionId.value)) {
+    return
+  }
+
+  sessions.value = upsertSessionSummary(sessions.value, {
+    bizChatId: selectedChatId.value,
+    bizSessionId: sessionId.value,
+    name: sessionName.value || submittedQuestion.value,
+  })
+  draftSession.value = null
 }
 
 async function confirmSessionDialog(): Promise<void> {
@@ -783,8 +883,7 @@ async function confirmDeleteSession(item: SessionItem): Promise<void> {
     pinnedSessionIds.value = pinnedSessionIds.value.filter((id) => id !== item.id)
     removeSessionCitationSnapshot(item.id)
     if (sessionId.value === item.id) {
-      activeSourceModal.value = null
-      citationsOpen.value = false
+      resetCitationUi({ closePanel: true })
       resetChat()
     }
     await loadSessions(selectedChatId.value)
@@ -838,262 +937,6 @@ function handleQuestionKeydown(event: KeyboardEvent): void {
   }
 }
 
-function selectSource(source: SourceItem): void {
-  void openSourceReference(source.referenceNumber, { openModal: true })
-}
-
-async function openSourceReference(
-  referenceNumber: number | null,
-  options: { messageId?: string; openModal?: boolean } = {},
-): Promise<void> {
-  if (referenceNumber === null) {
-    return
-  }
-
-  const focusSequence = sourceFocusSequence.value + 1
-  sourceFocusSequence.value = focusSequence
-
-  activeSourceModal.value = null
-  if (options.messageId) {
-    activeCitationMessageId.value = options.messageId
-  }
-
-  citationsOpen.value = true
-  activeSourceReferenceNumber.value = referenceNumber
-  await nextTick()
-  const target = await waitForSourceScrollTarget(referenceNumber, focusSequence)
-  if (focusSequence !== sourceFocusSequence.value) {
-    return
-  }
-
-  if (!target) {
-    activeSourceReferenceNumber.value = null
-    return
-  }
-
-  handleReferenceSelection(referenceNumber)
-  activeSourceReferenceNumber.value = referenceNumber
-  if (options.openModal) {
-    activeSourceModal.value = target.source
-  }
-  const centeredTarget = await centerSourceCard(referenceNumber, focusSequence, target)
-  if (options.openModal && centeredTarget) {
-    activeSourceModal.value = centeredTarget.source
-  }
-}
-
-function closeSourceModal(): void {
-  activeSourceModal.value = null
-}
-
-function storeSessionCitationSnapshot(
-  nextSessionId: string,
-  messageId: string,
-  items: SourceItem[],
-): void {
-  writeSessionCitationSnapshot(nextSessionId, messageId, items)
-}
-
-function setSourceCardElement(
-  source: SourceItem,
-  element: Element | ComponentPublicInstance | null,
-): void {
-  if (!(element instanceof HTMLElement)) {
-    return
-  }
-
-  sourceCardElements.set(sourceElementKey(source), element)
-}
-
-function pruneSourceCardElements(items: SourceItem[]): void {
-  const validKeys = new Set(items.map(sourceElementKey))
-  const container = sourceScrollElement.value
-
-  for (const [key, element] of sourceCardElements.entries()) {
-    if (!validKeys.has(key) || (container && !container.contains(element))) {
-      sourceCardElements.delete(key)
-    }
-  }
-}
-
-async function centerSourceCard(
-  referenceNumber: number,
-  focusSequence: number,
-  target: SourceScrollTarget,
-): Promise<SourceScrollTarget | null> {
-  let currentTarget: SourceScrollTarget | null = target
-
-  for (let attempt = 0; attempt < SOURCE_CARD_SCROLL_ATTEMPTS; attempt += 1) {
-    if (focusSequence !== sourceFocusSequence.value) {
-      return null
-    }
-
-    currentTarget = resolveSourceScrollTarget(referenceNumber) ?? currentTarget
-    if (!currentTarget) {
-      return null
-    }
-
-    applySourceScrollPosition(currentTarget)
-    await waitForNextFrame()
-    if (focusSequence !== sourceFocusSequence.value) {
-      return null
-    }
-
-    const refreshedTarget = resolveSourceScrollTarget(referenceNumber)
-    if (refreshedTarget) {
-      currentTarget = refreshedTarget
-      if (sourceCardIsCentered(refreshedTarget)) {
-        return refreshedTarget
-      }
-    }
-  }
-
-  if (currentTarget) {
-    applySourceScrollPosition(currentTarget)
-  }
-
-  return currentTarget
-}
-
-function applySourceScrollPosition(target: SourceScrollTarget): void {
-  const { container, element } = target
-  const position = calculateSourceScrollPosition(container, element)
-  container.scrollTop = position.top
-}
-
-function calculateSourceScrollPosition(
-  container: HTMLElement,
-  element: HTMLElement,
-): SourceScrollPosition {
-  const containerRect = container.getBoundingClientRect()
-  const elementRect = element.getBoundingClientRect()
-  const rawTop =
-    container.scrollTop +
-    elementRect.top -
-    containerRect.top -
-    (container.clientHeight - elementRect.height) / 2
-  const maxTop = Math.max(0, container.scrollHeight - container.clientHeight)
-  const top = Math.min(maxTop, Math.max(0, rawTop))
-  return { top, maxTop }
-}
-
-function sourceCardIsCentered(target: SourceScrollTarget): boolean {
-  const { container, element } = target
-  if (!container.contains(element)) {
-    return false
-  }
-
-  const containerRect = container.getBoundingClientRect()
-  const elementRect = element.getBoundingClientRect()
-  const elementCenter = elementRect.top + elementRect.height / 2
-  return (
-    elementCenter >= containerRect.top + containerRect.height * 0.25 &&
-    elementCenter <= containerRect.bottom - containerRect.height * 0.25
-  )
-}
-
-function waitForNextFrame(): Promise<void> {
-  return new Promise((resolve) => {
-    let hasResolved = false
-    let timeoutId = 0
-
-    const resolveOnce = (): void => {
-      if (hasResolved) {
-        return
-      }
-
-      hasResolved = true
-      window.clearTimeout(timeoutId)
-      resolve()
-    }
-
-    timeoutId = window.setTimeout(resolveOnce, SOURCE_CARD_FRAME_TIMEOUT_MS)
-    window.requestAnimationFrame(resolveOnce)
-  })
-}
-
-async function waitForSourceScrollTarget(
-  referenceNumber: number,
-  focusSequence: number,
-): Promise<SourceScrollTarget | null> {
-  for (let attempt = 0; attempt < SOURCE_CARD_RENDER_WAIT_FRAMES; attempt += 1) {
-    await nextTick()
-    await waitForNextFrame()
-    if (focusSequence !== sourceFocusSequence.value) {
-      return null
-    }
-
-    const target = resolveSourceScrollTarget(referenceNumber)
-    if (target) {
-      return target
-    }
-  }
-
-  return null
-}
-
-function resolveSourceScrollTarget(referenceNumber: number): SourceScrollTarget | null {
-  const source = sourceItems.value.find((item) => {
-    return item.referenceNumber === referenceNumber
-  })
-  if (!source) {
-    return null
-  }
-
-  const container = sourceScrollElement.value
-  const element = findSourceCardElement(source, container)
-  return toReadySourceScrollTarget(container, element, source)
-}
-
-function findSourceCardElement(
-  source: SourceItem,
-  container: HTMLElement | null,
-): HTMLElement | null {
-  const key = sourceElementKey(source)
-  const registeredElement = sourceCardElements.get(key)
-  if (registeredElement && container?.contains(registeredElement)) {
-    return registeredElement
-  }
-
-  return container?.querySelector<HTMLElement>(`[data-source-key="${key}"]`) ?? null
-}
-
-function toReadySourceScrollTarget(
-  container: HTMLElement | null,
-  element: HTMLElement | null | undefined,
-  source: SourceItem,
-): SourceScrollTarget | null {
-  if (!container || !element) {
-    return null
-  }
-
-  const containerRect = container.getBoundingClientRect()
-  const elementRect = element.getBoundingClientRect()
-  if (containerRect.height <= 0 || elementRect.height <= 0) {
-    return null
-  }
-
-  return {
-    container,
-    element,
-    source,
-  }
-}
-
-function sourceElementKey(source: SourceItem): string {
-  return `${source.referenceNumber}-${hashSourceId(source.id)}`
-}
-
-function hashSourceId(value: string): string {
-  let hash = 2166136261
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-
-  return (hash >>> 0).toString(36)
-}
-
 async function copyAnswer(content: string): Promise<void> {
   const text = normalizeAnswerForAction(content)
   if (!text) {
@@ -1126,50 +969,73 @@ function toggleThought(messageId: string): void {
   openThoughtIds.value = [...openThoughtIds.value, messageId]
 }
 
-function isThoughtOpen(messageId: string): boolean {
-  return openThoughtIds.value.includes(messageId)
+async function applyChatSelection(
+  chatId: string,
+  chatName: string,
+  options: { recoverUnavailableChat?: boolean } = {},
+): Promise<void> {
+  isApplyingConfigSelection.value = true
+  try {
+    selectedChatId.value = chatId
+    assistantChatId.value = chatId
+    assistantName.value = chatName
+    await loadSessions(chatId, options)
+  } finally {
+    isApplyingConfigSelection.value = false
+  }
 }
 
-async function saveKnowledgeConfig(): Promise<void> {
+async function saveKnowledgeConfig(
+  payload?: Omit<UpdateRagflowChatConfigPayload, 'biz_chat_id'>,
+): Promise<void> {
+  const updatedChat = payload
+    ? await persistAssistantConfig(payload)
+    : await persistKnowledgeConfig()
+  if (!updatedChat) {
+    return
+  }
+
+  assistantName.value = updatedChat.name
+  assistantChatId.value = updatedChat.biz_chat_id
+  const firstDataset = datasets.value.find((dataset) => {
+    return updatedChat.biz_knowledge_base_ids.includes(dataset.biz_knowledge_base_id)
+  })
+  if (firstDataset) {
+    knowledgeBaseName.value = firstDataset.name
+  } else {
+    knowledgeBaseName.value = ''
+  }
+}
+
+async function persistAssistantConfig(
+  payload: Omit<UpdateRagflowChatConfigPayload, 'biz_chat_id'>,
+) {
   if (!selectedChatId.value) {
     configErrorMessage.value = 'Select a RAGFlow assistant first.'
-    return
+    return null
   }
 
   configErrorMessage.value = ''
   isSavingConfig.value = true
-
   try {
     const updatedChat = await updateRagflowChatConfig({
       biz_chat_id: selectedChatId.value,
-      biz_knowledge_base_ids: selectedDatasetIds.value,
+      ...payload,
     })
     chats.value = chats.value.map((chat) => {
       return chat.biz_chat_id === updatedChat.biz_chat_id ? updatedChat : chat
     })
     selectedChatId.value = updatedChat.biz_chat_id
-    assistantName.value = updatedChat.name
-    assistantChatId.value = updatedChat.biz_chat_id
-    const firstDataset = datasets.value.find((dataset) => {
-      return updatedChat.biz_knowledge_base_ids.includes(dataset.biz_knowledge_base_id)
-    })
-    if (firstDataset) {
-      knowledgeBaseName.value = firstDataset.name
-    }
+    selectedDatasetIds.value = [...updatedChat.biz_knowledge_base_ids]
+    configLlmId.value = updatedChat.llm_id
+    assistantTuningDraft.value = toAssistantTuningDraft(updatedChat)
+    return updatedChat
   } catch (error: unknown) {
-    configErrorMessage.value = toFriendlyMessage(error, 'Failed to save RAGFlow knowledge config.')
+    configErrorMessage.value = toFriendlyMessage(error, 'Failed to save RAGFlow assistant config.')
+    return null
   } finally {
     isSavingConfig.value = false
   }
-}
-
-function toggleDataset(datasetId: string): void {
-  if (selectedDatasetIds.value.includes(datasetId)) {
-    selectedDatasetIds.value = selectedDatasetIds.value.filter((id) => id !== datasetId)
-    return
-  }
-
-  selectedDatasetIds.value = [...selectedDatasetIds.value, datasetId]
 }
 
 async function selectModel(model: ModelOption): Promise<void> {
@@ -1181,31 +1047,11 @@ async function selectModel(model: ModelOption): Promise<void> {
 }
 
 async function saveModelConfig(modelId: string): Promise<void> {
-  if (!selectedChatId.value) {
-    configErrorMessage.value = 'Select a RAGFlow assistant first.'
-    return
-  }
-
-  configErrorMessage.value = ''
-  isSavingConfig.value = true
-
-  try {
-    const updatedChat = await updateRagflowChatConfig({
-      biz_chat_id: selectedChatId.value,
-      biz_knowledge_base_ids: selectedDatasetIds.value,
-      llm_id: modelId.trim() || undefined,
-    })
-    chats.value = chats.value.map((chat) => {
-      return chat.biz_chat_id === updatedChat.biz_chat_id ? updatedChat : chat
-    })
-    selectedChatId.value = updatedChat.biz_chat_id
+  const updatedChat = await persistModelConfig(modelId)
+  if (updatedChat) {
     assistantName.value = updatedChat.name
     assistantChatId.value = updatedChat.biz_chat_id
-    configLlmId.value = updatedChat.llm_id
-  } catch (error: unknown) {
-    configErrorMessage.value = toFriendlyMessage(error, 'Failed to save RAGFlow model config.')
-  } finally {
-    isSavingConfig.value = false
+    assistantTuningDraft.value = toAssistantTuningDraft(updatedChat)
   }
 }
 
@@ -1304,6 +1150,68 @@ function normalizeComparableMessage(value: string): string {
   return normalizedValue.replace(/\s+/g, ' ').trim()
 }
 
+function createEmptyAssistantTuningDraft(): AssistantTuningDraft {
+  return {
+    llmId: '',
+    similarityThreshold: 0.1,
+    vectorSimilarityWeight: 0.3,
+    topK: 1024,
+    topN: 6,
+    rerankId: '',
+    promptSystem: '',
+    emptyResponse: '',
+    quote: true,
+  }
+}
+
+function toAssistantTuningDraft(chat: {
+  llm_id: string
+  similarity_threshold: number
+  vector_similarity_weight: number
+  top_k: number
+  top_n: number
+  rerank_id: string
+  prompt_config: Record<string, unknown>
+}): AssistantTuningDraft {
+  const promptConfig = chat.prompt_config
+  return {
+    llmId: chat.llm_id,
+    similarityThreshold: clampConfigNumber(chat.similarity_threshold, 0, 1, 0.1),
+    vectorSimilarityWeight: clampConfigNumber(chat.vector_similarity_weight, 0, 1, 0.3),
+    topK: clampConfigNumber(chat.top_k, 1, 10000, 1024),
+    topN: clampConfigNumber(chat.top_n, 1, 100, 6),
+    rerankId: chat.rerank_id,
+    promptSystem: readPromptString(promptConfig, 'system') || readPromptString(promptConfig, 'prompt'),
+    emptyResponse: readPromptString(promptConfig, 'empty_response'),
+    quote: readPromptBoolean(promptConfig, 'quote', true),
+  }
+}
+
+function clampConfigNumber(
+  value: number,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  if (!Number.isFinite(value)) {
+    return fallback
+  }
+  return Math.min(max, Math.max(min, value))
+}
+
+function readPromptString(promptConfig: Record<string, unknown>, key: string): string {
+  const value = promptConfig[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function readPromptBoolean(
+  promptConfig: Record<string, unknown>,
+  key: string,
+  fallback: boolean,
+): boolean {
+  const value = promptConfig[key]
+  return typeof value === 'boolean' ? value : fallback
+}
 function readStringArray(storageKey: string): string[] {
   try {
     const value = window.localStorage.getItem(storageKey)
@@ -1329,84 +1237,47 @@ function normalizeMessageContent(value: string): string {
 </script>
 
 <template>
-  <!-- Mobile Top Bar -->
-  <header class="flex justify-between items-center w-full px-container-padding-mobile py-stack-sm bg-surface border-b border-outline-variant md:hidden">
-    <div class="font-headline-sm text-headline-sm font-bold text-primary">Research Assistant</div>
-    <div class="flex gap-stack-sm">
-      <span class="material-symbols-outlined hover:bg-surface-container-low rounded-full p-2 transition-all duration-200 cursor-pointer" data-icon="notifications" @click="checkHealth">notifications</span>
-      <span class="material-symbols-outlined hover:bg-surface-container-low rounded-full p-2 transition-all duration-200 cursor-pointer" data-icon="account_circle" @click="isSettingsOpen = true">account_circle</span>
-    </div>
-  </header>
-  <div class="flex h-full w-full min-h-0">
-    <!-- Sidebar Navigation -->
-    <aside class="fixed left-0 top-0 h-full z-40 py-stack-md px-stack-sm w-[260px] flex-col hidden md:flex bg-surface border-r border-outline-variant">
-      <div class="mb-stack-lg px-stack-sm">
-        <h1 class="font-headline-md text-headline-md font-bold text-primary">Research Assistant</h1>
-        <p class="font-body-md text-body-md text-on-surface-variant">AI Knowledge Base</p>
-      </div>
-      <button class="mx-stack-sm mb-stack-lg bg-primary text-on-primary py-stack-sm px-stack-md rounded-lg font-label-caps text-label-caps flex items-center justify-center gap-2 active:scale-95 transition-transform" type="button" @click="createNewChat">
-        <span class="material-symbols-outlined text-[18px]" data-icon="add">add</span>
-        New Chat
-      </button>
-      <nav class="flex-1 space-y-1">
-        <div class="mt-4 mb-2 px-stack-sm">
-          <p class="text-[11px] font-bold text-outline uppercase tracking-wider mb-2">Chat Sessions</p>
-          <div class="space-y-1">
-            <div
-              v-for="item in sessionItems.slice(0, 12)"
-              :key="item.id"
-              class="group relative flex items-center"
-            >
-              <a
-                class="flex-1 block px-stack-sm py-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors duration-200 text-[13px] truncate"
-                :class="{ 'bg-surface-container font-bold text-primary': item.id === sessionId }"
-                href="#"
-                @click.prevent="selectSession(item)"
-              >
-                <span v-if="item.isPinned" class="material-symbols-outlined text-[12px]">push_pin</span>
-                {{ item.name }}
-              </a>
-              <button class="absolute right-1 group-hover:opacity-100 p-1 hover:bg-surface-container-high rounded transition-all duration-200 text-on-surface-variant hover:text-primary opacity-40" type="button" @click.stop="toggleSessionMenu(item)">
-                <span class="material-symbols-outlined text-[18px]">more_vert</span>
-              </button>
-              <div v-if="openSessionMenuId === item.id" class="session-menu">
-                <button type="button" class="session-menu__item" @click.stop="togglePinnedSession(item)">
-                  <span class="material-symbols-outlined text-[16px]">{{ item.isPinned ? 'keep_off' : 'push_pin' }}</span>
-                  {{ item.isPinned ? 'Unpin' : 'Pin' }}
-                </button>
-                <button type="button" class="session-menu__item" @click.stop="renameSession(item)">
-                  <span class="material-symbols-outlined text-[16px]">edit</span>
-                  Rename
-                </button>
-                <button type="button" class="session-menu__item session-menu__item--danger" @click.stop="removeSession(item)">
-                  <span class="material-symbols-outlined text-[16px]">delete</span>
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div>
-          <p v-if="isLoadingSessions" class="text-[11px] text-outline mt-2 px-stack-sm">Loading sessions...</p>
-          <p v-else-if="sessionItems.length === 0" class="text-[11px] text-outline mt-2 px-stack-sm">No chat sessions</p>
-        </div>
-      </nav>
-      <div class="mt-auto border-t border-outline-variant pt-stack-md space-y-1">
-        <a class="flex items-center gap-3 px-stack-sm py-2 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors duration-200" href="#" @click.prevent="isKnowledgeOpen = true">
-          <span class="material-symbols-outlined" data-icon="database">database</span>
-          <span class="font-body-md">Knowledge Base</span>
-        </a>
-        <a class="flex items-center gap-3 px-stack-sm py-2 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors duration-200" href="#" @click.prevent="isSettingsOpen = true">
-          <span class="material-symbols-outlined" data-icon="settings">settings</span>
-          <span class="font-body-md">Settings</span>
-        </a>
-        <div class="flex items-center gap-3 px-stack-sm py-4">
-          <img class="w-8 h-8 rounded-full border border-outline-variant" data-alt="A professional portrait of a business researcher" :src="PROFILE_IMAGE_URL" />
-          <div class="overflow-hidden">
-            <p class="text-on-surface font-bold truncate">Alex Sterling</p>
-            <p class="text-on-surface-variant text-[11px] truncate">{{ healthStatus }}</p>
-          </div>
-        </div>
-      </div>
-    </aside>
+  <AuthPanel
+    v-if="!isAuthenticated"
+    v-model:auth-email="authEmail"
+    v-model:auth-nickname="authNickname"
+    v-model:auth-password="authPassword"
+    :auth-config="authConfig"
+    :auth-error-message="authErrorMessage"
+    :auth-mode="authMode"
+    :auth-submit-label="authSubmitLabel"
+    :auth-title="authTitle"
+    :can-submit-auth="canSubmitAuth"
+    @submit-auth="submitAuth"
+    @switch-mode="switchAuthMode"
+  />
+
+  <MobileTopBar
+    v-if="isAuthenticated"
+    @check-health="checkHealth"
+    @open-settings="isSettingsOpen = true"
+  />
+
+  <div v-if="isAuthenticated" class="flex h-full w-full min-h-0">
+    <AppSidebar
+      :avatar-url="authUser?.avatar || PROFILE_IMAGE_URL"
+      :is-loading-sessions="isLoadingSessions"
+      :open-session-menu-id="openSessionMenuId"
+      :profile-name="profileName"
+      :profile-subtitle="profileSubtitle"
+      :session-id="sessionId"
+      :session-items="sessionItems"
+      @create-new-chat="createNewChat"
+      @open-agent-config="isKnowledgeOpen = true"
+      @open-knowledge="isKnowledgeOpen = true"
+      @open-settings="isSettingsOpen = true"
+      @remove-session="removeSession"
+      @rename-session="renameSession"
+      @select-session="selectSession"
+      @sign-out="signOut"
+      @toggle-pinned-session="togglePinnedSession"
+      @toggle-session-menu="toggleSessionMenu"
+    />
     <!-- Main Content Wrapper -->
     <main class="flex-1 md:ml-[260px] h-full min-h-0 min-w-0 flex flex-col md:flex-row overflow-hidden pb-16 md:pb-0">
       <!-- Middle Column: Source Citations (40%) -->
@@ -1415,7 +1286,7 @@ function normalizeMessageContent(value: string): string {
           <h2 class="font-headline-sm text-headline-sm font-semibold">Source Citations</h2>
           <span class="font-label-caps text-label-caps text-secondary bg-secondary-container px-2 py-1 rounded">{{ sourceCountLabel }}</span>
         </header>
-        <div ref="sourceScrollElement" data-source-scroll="true" class="flex-1 min-h-0 overflow-y-auto p-stack-md space-y-stack-md custom-scrollbar">
+        <div :ref="setSourceScrollElement" data-source-scroll="true" class="flex-1 min-h-0 overflow-y-auto p-stack-md space-y-stack-md custom-scrollbar">
           <div v-if="sourceItems.length === 0" class="flex flex-col items-center justify-center h-full text-center px-stack-lg space-y-stack-md opacity-60">
             <div class="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center text-outline mb-2">
               <span class="material-symbols-outlined text-[32px]" data-icon="find_in_page">find_in_page</span>
@@ -1479,159 +1350,25 @@ function normalizeMessageContent(value: string): string {
           </div>
         </header>
         <div ref="chatScrollElement" class="flex-1 min-h-0 overflow-y-auto p-stack-md md:p-stack-lg custom-scrollbar space-y-stack-lg chat-scroll-area">
-          <template v-for="message in displayedTranscriptMessages" :key="message.id">
-              <div v-if="message.role === 'user'" class="flex justify-end">
-                <div class="max-w-[85%] bg-surface-container-low border border-outline-variant rounded-2xl rounded-tr-none p-stack-md">
-                  <p class="font-body-md text-on-surface">{{ message.content }}</p>
-                </div>
-              </div>
-              <div v-else class="flex justify-start items-start gap-4">
-                <div class="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 text-white mt-1">
-                  <span class="material-symbols-outlined text-[18px]" data-icon="smart_toy">smart_toy</span>
-                </div>
-                <div class="max-w-[90%] bg-surface-container-lowest border border-outline-variant rounded-2xl rounded-tl-none p-stack-md shadow-sm">
-                  <button
-                    v-if="message.hasThought"
-                    class="thought-toggle"
-                    type="button"
-                    @click="toggleThought(message.id)"
-                  >
-                    <span class="material-symbols-outlined text-[16px]">{{ isThoughtOpen(message.id) ? 'expand_less' : 'psychology' }}</span>
-                    {{ isThoughtOpen(message.id) ? 'Hide Thinking' : 'Show Thinking' }}
-                  </button>
-                  <div v-if="message.hasThought && isThoughtOpen(message.id)" class="thought-panel">
-                    {{ message.thoughtContent }}
-                  </div>
-                  <p class="font-body-lg text-on-background whitespace-pre-wrap">
-                    <template v-if="message.answerSegments.length > 0">
-                      <template v-for="segment in message.answerSegments" :key="segment.key">
-                        <span v-if="segment.kind === 'text'">{{ segment.text }}</span>
-                        <button
-                          v-else
-                          class="citation-badge"
-                          type="button"
-                          @click="openSourceReference(segment.referenceNumber, { messageId: message.id })"
-                        >{{ segment.referenceNumber }}</button>
-                      </template>
-                    </template>
-                    <span v-else>{{ message.answerContent }}</span>
-                  </p>
-                  <div class="message-actions">
-                    <button
-                      type="button"
-                      class="message-action"
-                      :class="{ 'message-action--flash': flashedActionKey === 'copy' }"
-                      title="Copy"
-                      @click="copyAnswer(message.content)"
-                    >
-                      <span class="material-symbols-outlined text-[15px]">content_copy</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-          </template>
-
-          <div v-if="submittedQuestion" class="flex justify-end">
-            <div class="max-w-[85%] bg-surface-container-low border border-outline-variant rounded-2xl rounded-tr-none p-stack-md">
-              <p class="font-body-md text-on-surface">{{ submittedQuestion }}</p>
-            </div>
-          </div>
-
-          <div v-if="shouldShowAnswer" class="flex justify-start items-start gap-4">
-            <div class="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 text-white mt-1">
-              <span class="material-symbols-outlined text-[18px]" data-icon="smart_toy">smart_toy</span>
-            </div>
-            <div
-              class="max-w-[90%] bg-surface-container-lowest border border-outline-variant rounded-2xl rounded-tl-none p-stack-md shadow-sm"
-              :class="{ 'live-answer-card live-answer-card--streaming': liveAnswerIsStreaming }"
-            >
-              <div class="space-y-4">
-                <p v-if="chatErrorMessage || answerIsError" class="font-body-md text-error whitespace-pre-wrap">{{ chatErrorMessage || streamedAnswer }}</p>
-                <template v-else>
-                  <div v-if="liveAnswerIsStreaming" class="streaming-answer-status" aria-live="polite">
-                    <span class="streaming-answer-status__pulse"></span>
-                    <span>Generating answer</span>
-                  </div>
-                  <div v-if="isLiveThinkingOnly" class="thinking-state">
-                    <button
-                      class="thought-toggle thought-toggle--streaming"
-                      type="button"
-                      @click="toggleThought('live-answer')"
-                    >
-                      <span class="material-symbols-outlined text-[16px]">{{ isThoughtOpen('live-answer') ? 'expand_less' : 'psychology' }}</span>
-                      Thinking...
-                    </button>
-                    <div v-if="isThoughtOpen('live-answer')" class="thought-panel">
-                      {{ liveAnswerPresentation.thought }}
-                    </div>
-                  </div>
-                  <template v-else>
-                    <button
-                      v-if="liveAnswerPresentation.hasThought"
-                      class="thought-toggle"
-                      type="button"
-                      @click="toggleThought('live-answer')"
-                    >
-                      <span class="material-symbols-outlined text-[16px]">{{ isThoughtOpen('live-answer') ? 'expand_less' : 'psychology' }}</span>
-                      {{ isThoughtOpen('live-answer') ? 'Hide Thinking' : 'Show Thinking' }}
-                    </button>
-                    <div v-if="liveAnswerPresentation.hasThought && isThoughtOpen('live-answer')" class="thought-panel">
-                      {{ liveAnswerPresentation.thought }}
-                    </div>
-                    <p class="font-body-lg text-on-background whitespace-pre-wrap">
-                      <template v-if="liveAnswerSegments.length > 0">
-                        <template v-for="segment in liveAnswerSegments" :key="segment.key">
-                          <span v-if="segment.kind === 'text'">{{ segment.text }}</span>
-                          <button
-                            v-else
-                            class="citation-badge"
-                            type="button"
-                            @click="openSourceReference(segment.referenceNumber)"
-                          >{{ segment.referenceNumber }}</button>
-                        </template>
-                      </template>
-                      <span v-if="liveAnswerIsStreaming" class="streaming-caret" aria-hidden="true"></span>
-                    </p>
-                    <div v-if="!isStreamingChat" class="message-actions">
-                      <button
-                        type="button"
-                        class="message-action"
-                        :class="{ 'message-action--flash': flashedActionKey === 'copy' }"
-                        title="Copy"
-                        @click="copyAnswer(streamedAnswer)"
-                      >
-                        <span class="material-symbols-outlined text-[15px]">content_copy</span>
-                      </button>
-                    </div>
-                  </template>
-                </template>
-                <div v-if="referenceCards.length > 0" class="p-stack-sm bg-secondary-container/20 rounded-lg border border-secondary/10 flex gap-3">
-                  <span class="material-symbols-outlined text-secondary" data-icon="lightbulb">lightbulb</span>
-                  <p class="text-[13px] text-on-secondary-fixed-variant italic">Consider reviewing the cited source cards to verify the response against RAGFlow references.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="chatErrorMessage" class="flex justify-start items-start gap-4">
-            <div class="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 text-white mt-1">
-              <span class="material-symbols-outlined text-[18px]" data-icon="smart_toy">smart_toy</span>
-            </div>
-            <div class="max-w-[90%] bg-error-container border border-outline-variant rounded-2xl rounded-tl-none p-stack-md shadow-sm">
-              <p class="font-body-md text-error whitespace-pre-wrap">{{ chatErrorMessage }}</p>
-            </div>
-          </div>
-
-          <div v-if="isStreamingChat && !shouldShowAnswer" class="flex justify-start items-start gap-4">
-            <div class="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 text-white mt-1">
-              <span class="material-symbols-outlined text-[18px]" data-icon="smart_toy">smart_toy</span>
-            </div>
-            <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-3 flex gap-1">
-              <span class="w-1.5 h-1.5 bg-secondary/40 rounded-full"></span>
-              <span class="w-1.5 h-1.5 bg-secondary/70 rounded-full"></span>
-              <span class="w-1.5 h-1.5 bg-secondary rounded-full"></span>
-            </div>
-          </div>
+          <ChatMessageList
+            :answer-is-error="answerIsError"
+            :chat-error-message="chatErrorMessage"
+            :displayed-transcript-messages="displayedTranscriptMessages"
+            :flashed-action-key="flashedActionKey"
+            :is-live-thinking-only="isLiveThinkingOnly"
+            :is-streaming-chat="isStreamingChat"
+            :live-answer-is-streaming="liveAnswerIsStreaming"
+            :live-answer-presentation="liveAnswerPresentation"
+            :live-answer-segments="liveAnswerSegments"
+            :open-thought-ids="openThoughtIds"
+            :reference-count="referenceCards.length"
+            :should-show-answer="shouldShowAnswer"
+            :streamed-answer="streamedAnswer"
+            :submitted-question="submittedQuestion"
+            @copy-answer="copyAnswer"
+            @open-source-reference="openSourceReference"
+            @toggle-thought="toggleThought"
+          />
         </div>
         <!-- Chat Input Area -->
         <div class="chat-input-area">
@@ -1645,7 +1382,7 @@ function normalizeMessageContent(value: string): string {
             <input v-model.trim="question" class="flex-1 bg-transparent border-none focus:ring-0 text-body-md px-2 placeholder:text-outline" :placeholder="chatInputPlaceholder" type="text" :disabled="!hasAvailableChat" @keydown="handleQuestionKeydown" />
             <div class="flex gap-1">
               <button class="p-2 text-on-surface-variant hover:text-primary transition-colors" type="button" @click="isSettingsOpen = true">
-                <span class="material-symbols-outlined" data-icon="mic">mic</span>
+                <span class="material-symbols-outlined" data-icon="settings">settings</span>
               </button>
               <button v-if="isStreamingChat" class="bg-primary text-on-primary p-2 rounded-lg hover:bg-primary/90 transition-all active:scale-95" type="button" @click="cancelChat">
                 <span class="material-symbols-outlined" data-icon="stop">stop</span>
@@ -1660,198 +1397,63 @@ function normalizeMessageContent(value: string): string {
       </section>
     </main>
   </div>
-  <!-- Mobile Navigation Bar -->
-  <nav class="flex justify-around items-center h-16 w-full z-50 bg-surface border-t border-outline-variant fixed bottom-0 md:hidden shadow-lg">
-    <div class="flex flex-col items-center gap-1 text-secondary scale-110">
-      <span class="material-symbols-outlined" data-icon="chat">chat</span>
-      <span class="font-label-caps text-[10px]">Chat</span>
-    </div>
-    <button class="flex flex-col items-center gap-1 text-on-surface-variant" type="button" @click="isKnowledgeOpen = true">
-      <span class="material-symbols-outlined" data-icon="database">database</span>
-      <span class="font-label-caps text-[10px]">Knowledge</span>
-    </button>
-    <button class="flex flex-col items-center gap-1 text-on-surface-variant" type="button" @click="isSettingsOpen = true">
-      <span class="material-symbols-outlined" data-icon="settings">settings</span>
-      <span class="font-label-caps text-[10px]">Settings</span>
-    </button>
-  </nav>
 
-  <div v-if="isKnowledgeOpen" class="dialog-backdrop" @click.self="isKnowledgeOpen = false">
-    <section class="dialog-panel dialog-panel--wide">
-      <header class="dialog-header">
-        <div>
-          <p>Knowledge Base</p>
-          <h2>RAGFlow Assistant Knowledge</h2>
-        </div>
-        <button type="button" class="dialog-close" @click="isKnowledgeOpen = false">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </header>
+  <MobileNavigation
+    v-if="isAuthenticated"
+    @open-knowledge="isKnowledgeOpen = true"
+    @open-settings="isSettingsOpen = true"
+  />
 
-      <div class="settings-grid knowledge-assistant-grid">
-        <label>
-          <span>Assistant</span>
-          <select v-model="selectedChatId">
-            <option value="" disabled>
-              No assistant available
-            </option>
-            <option v-for="chat in chats" :key="chat.biz_chat_id" :value="chat.biz_chat_id">
-              {{ chat.name }}
-            </option>
-          </select>
-        </label>
-      </div>
+  <KnowledgeDialog
+    v-if="isKnowledgeOpen"
+    v-model:selected-chat-id="selectedChatId"
+    :chats="chats"
+    :config-error-message="configErrorMessage"
+    :datasets="datasets"
+    :has-available-chat="hasAvailableChat"
+    :is-loading-config="isLoadingConfig"
+    :is-saving-config="isSavingConfig"
+    :model-options="modelOptions"
+    :selected-dataset-ids="selectedDatasetIds"
+    :tuning-draft="assistantTuningDraft"
+    @close="isKnowledgeOpen = false"
+    @load-config="loadConfig"
+    @save-config="saveKnowledgeConfig"
+    @toggle-dataset="toggleDataset"
+    @update:tuning-draft="assistantTuningDraft = $event"
+  />
 
-      <p v-if="configErrorMessage" class="dialog-error">{{ configErrorMessage }}</p>
-      <div class="dataset-list">
-        <label
-          v-for="dataset in datasets"
-          :key="dataset.biz_knowledge_base_id"
-          class="dataset-option"
-        >
-          <input
-            type="checkbox"
-            :checked="selectedDatasetIds.includes(dataset.biz_knowledge_base_id)"
-            @change="toggleDataset(dataset.biz_knowledge_base_id)"
-          />
-          <span>
-            <strong>{{ dataset.name }}</strong>
-            <small>{{ dataset.embedding_model || 'No embedding model' }} | {{ dataset.document_count }} docs | {{ dataset.chunk_count }} chunks</small>
-          </span>
-        </label>
-      </div>
-      <div class="dialog-actions">
-        <button type="button" class="dialog-action" :disabled="isLoadingConfig" @click="loadConfig">
-          {{ isLoadingConfig ? 'Loading...' : 'Refresh RAGFlow Config' }}
-        </button>
-        <button type="button" class="dialog-action dialog-action--primary" :disabled="isSavingConfig || !hasAvailableChat" @click="saveKnowledgeConfig">
-          {{ isSavingConfig ? 'Saving...' : 'Save Knowledge Config' }}
-        </button>
-      </div>
-    </section>
-  </div>
+  <SessionDialog
+    v-if="sessionDialogMode"
+    v-model:pending-session-name="pendingSessionName"
+    :is-busy="isSessionActionBusy"
+    :mode="sessionDialogMode"
+    :session-item="pendingSessionItem"
+    :subtitle="sessionDialogSubtitle"
+    :title="sessionDialogTitle"
+    @close="closeSessionDialog"
+    @confirm="confirmSessionDialog"
+  />
 
-  <div v-if="sessionDialogMode" class="dialog-backdrop" @click.self="closeSessionDialog">
-    <section class="dialog-panel dialog-panel--compact">
-      <header class="dialog-header">
-        <div>
-          <p>Chat Sessions</p>
-          <h2>{{ sessionDialogTitle }}</h2>
-        </div>
-        <button type="button" class="dialog-close" @click="closeSessionDialog">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </header>
-      <p class="dialog-copy">{{ sessionDialogSubtitle }}</p>
+  <SourceModal
+    :preview="activeSourceModalPreview"
+    :source="activeSourceModal"
+    @close="closeSourceModal"
+  />
 
-      <label v-if="sessionDialogMode === 'rename'" class="prompt-field">
-        <span>Session Name</span>
-        <input v-model.trim="pendingSessionName" type="text" @keydown.enter.prevent="confirmSessionDialog" />
-      </label>
-
-      <div v-else class="delete-preview">
-        <span class="material-symbols-outlined text-error">warning</span>
-        <div>
-          <strong>{{ pendingSessionItem?.name }}</strong>
-          <small>This action cannot be undone for RAGFlow-backed sessions.</small>
-        </div>
-      </div>
-
-      <div class="dialog-actions">
-        <button type="button" class="dialog-action" :disabled="isSessionActionBusy" @click="closeSessionDialog">
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="dialog-action dialog-action--primary"
-          :disabled="isSessionActionBusy || (sessionDialogMode === 'rename' && pendingSessionName.trim().length === 0)"
-          @click="confirmSessionDialog"
-        >
-          {{ isSessionActionBusy ? 'Working...' : (sessionDialogMode === 'delete' ? 'Delete' : 'Save') }}
-        </button>
-      </div>
-    </section>
-  </div>
-
-  <div
-    v-if="activeSourceModal"
-    class="fixed inset-0 z-50 flex items-center justify-center p-container-padding-mobile md:p-container-padding-desktop bg-on-background/40 backdrop-blur-sm animate-in fade-in duration-200"
-    @click.self="closeSourceModal"
-  >
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-[600px] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-outline-variant">
-      <div class="flex items-center justify-between px-stack-md py-stack-md border-b border-outline-variant">
-        <div class="flex items-center gap-3 min-w-0">
-          <span class="material-symbols-outlined text-secondary" data-icon="article">article</span>
-          <h2 class="font-headline-sm text-headline-sm text-primary truncate">{{ activeSourceModal.title }}</h2>
-        </div>
-        <button class="p-2 hover:bg-surface-container rounded-full transition-colors" type="button" @click="closeSourceModal">
-          <span class="material-symbols-outlined" data-icon="close">close</span>
-        </button>
-      </div>
-
-      <div class="p-stack-lg space-y-stack-md">
-        <div class="flex items-center gap-gutter text-on-surface-variant pb-stack-md border-b border-outline-variant">
-          <div class="flex flex-col min-w-0">
-            <span class="font-label-caps text-[10px] uppercase tracking-wider">Source</span>
-            <span class="font-body-md text-on-surface font-medium truncate">{{ activeSourceModal.sourceName }}</span>
-          </div>
-          <div class="w-px h-8 bg-outline-variant"></div>
-          <div class="flex flex-col">
-            <span class="font-label-caps text-[10px] uppercase tracking-wider">Reference</span>
-            <span class="font-body-md text-on-surface font-medium">REF [{{ activeSourceModal.referenceNumber }}]</span>
-          </div>
-        </div>
-
-        <div class="relative py-stack-sm source-modal-body custom-scrollbar">
-          <div class="absolute -left-4 top-0 bottom-0 w-1 bg-secondary/30 rounded-full"></div>
-          <p class="font-body-lg text-body-lg leading-relaxed text-on-surface whitespace-pre-wrap">{{ activeSourceModalPreview }}</p>
-        </div>
-      </div>
-
-      <div class="px-stack-lg py-stack-md bg-surface-container-lowest flex justify-end">
-        <button class="bg-surface-container-high text-on-surface px-stack-md py-2 rounded-lg font-label-caps text-label-caps hover:bg-surface-container-highest transition-colors" type="button" @click="closeSourceModal">
-          Close
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div v-if="isSettingsOpen" class="dialog-backdrop" @click.self="isSettingsOpen = false">
-    <section class="dialog-panel dialog-panel--compact">
-      <header class="dialog-header">
-        <div>
-          <p>Settings</p>
-          <h2>Service Status</h2>
-        </div>
-        <button type="button" class="dialog-close" @click="isSettingsOpen = false">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </header>
-
-      <div class="settings-summary">
-        <div>
-          <span>Assistant</span>
-          <strong>{{ assistantName || 'No assistant selected' }}</strong>
-        </div>
-        <div>
-          <span>Knowledge Base</span>
-          <strong>{{ knowledgeBaseName || 'No knowledge base selected' }}</strong>
-        </div>
-        <div>
-          <span>Connection</span>
-          <strong>{{ healthStatus }}</strong>
-        </div>
-      </div>
-
-      <p v-if="configErrorMessage" class="dialog-error">{{ configErrorMessage }}</p>
-      <div class="dialog-actions">
-        <button type="button" class="dialog-action" :disabled="isLoadingConfig" @click="loadConfig">
-          Reload
-        </button>
-        <button type="button" class="dialog-action dialog-action--primary" @click="checkHealth">
-          Check Health
-        </button>
-      </div>
-    </section>
-  </div>
+  <SettingsDialog
+    v-if="isSettingsOpen"
+    :assistant-name="assistantName"
+    :config-error-message="configErrorMessage"
+    :health-status="healthStatus"
+    :is-loading-config="isLoadingConfig"
+    :knowledge-base-name="knowledgeBaseName"
+    :profile-name="profileName"
+    :profile-subtitle="profileSubtitle"
+    @check-health="checkHealth"
+    @close="isSettingsOpen = false"
+    @reload="loadConfig"
+    @sign-out="signOut"
+  />
 </template>
+

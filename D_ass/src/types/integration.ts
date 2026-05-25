@@ -2,6 +2,32 @@ export interface HealthResponse {
   status: string
 }
 
+export interface AuthConfigResponse {
+  register_enabled: boolean
+  disable_password_login: boolean
+}
+
+export interface AuthUser {
+  id: string
+  email: string
+  nickname: string
+  avatar: string
+}
+
+export interface AuthSessionResponse {
+  authorization: string
+  user: AuthUser
+}
+
+export interface AuthLoginPayload {
+  email: string
+  password: string
+}
+
+export interface AuthRegisterPayload extends AuthLoginPayload {
+  nickname: string
+}
+
 export interface UploadKnowledgeFilePayload {
   knowledge_base_name: string
   biz_file_id: string
@@ -50,7 +76,6 @@ export interface ChatRequest {
   question: string
   biz_chat_id?: string
   biz_session_id?: string
-  session_name?: string
 }
 
 export interface ChatReference {
@@ -64,6 +89,8 @@ export interface ChatReference {
 export interface ChatResponse {
   answer: string
   references: ChatReference[]
+  biz_session_id?: string | null
+  session_name?: string | null
   error_code?: string | null
   error_message?: string | null
 }
@@ -122,10 +149,6 @@ export interface RagflowSession {
 
 export interface ListRagflowSessionsResponse {
   sessions: RagflowSession[]
-}
-
-export interface CreateRagflowSessionPayload {
-  name: string
 }
 
 export interface UpdateRagflowSessionPayload {

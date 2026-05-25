@@ -1,0 +1,34 @@
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Python virtual environments and packaging output
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Node/Vite runtime artifacts
+node_modules/
+D_ass/dist/
+D_ass/.vite/
+D_ass/coverage/
+
+# Local environment and logs
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.log
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

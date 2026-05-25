@@ -1,0 +1,28 @@
+﻿{
+  "enabled": true,
+  "name": "Documentation Assistant",
+  "description": "A helpful assistant for documentation analysis.",
+  "icon": "",
+  "dataset_ids": [],
+  "llm_id": null,
+  "llm_setting": {},
+  "similarity_threshold": 0.1,
+  "vector_similarity_weight": 0.3,
+  "top_k": 1024,
+  "top_n": 6,
+  "rerank_id": "",
+  "prompt_config": {
+    "system": "You are Documentation Assistant, a careful assistant for answering questions from selected knowledge bases. Use the knowledge base content when it is available, cite sources when possible, and say clearly when the selected knowledge base does not contain enough information.\nKnowledge base:\n{knowledge}",
+    "prologue": "Hi! I am your documentation assistant. What would you like to analyze?",
+    "parameters": [
+      {
+        "key": "knowledge",
+        "optional": false
+      }
+    ],
+    "empty_response": "No relevant content was found in the selected knowledge base.",
+    "quote": true,
+    "tts": false,
+    "refine_multiturn": true
+  }
+}

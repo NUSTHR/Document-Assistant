@@ -169,21 +169,6 @@ class RagflowConfigAdapter:
             for session in self._list_raw_sessions(chat_id)
         ]
 
-    def create_session(
-        self,
-        biz_chat_id: str,
-        name: str,
-    ) -> RagflowSessionResult:
-        chat_id = self._resolve_chat_id(biz_chat_id)
-        payload = self._client.post(
-            f"/chats/{chat_id}/sessions",
-            json_body={"name": name},
-        )
-        session = payload.get("data")
-        if not isinstance(session, dict):
-            raise RagflowIntegrationError("ragflow session response was empty")
-        return self._to_session_response(session, chat_id)
-
     def update_session_name(
         self,
         biz_chat_id: str,

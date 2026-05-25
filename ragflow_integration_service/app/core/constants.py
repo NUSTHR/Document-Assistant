@@ -1,7 +1,6 @@
 UNKNOWN_BIZ_FILE_ID = "UNKNOWN"
 UNKNOWN_BIZ_FILE_NAME = "unknown-file"
 UNKNOWN_PARSE_STATUS = "UNKNOWN"
-DEFAULT_SESSION_NAME = "integration-session"
 DISPLAY_NAME_TEMPLATE = "[biz_id:{biz_file_id}]{biz_file_name}"
 INLINE_REFERENCE_PATTERN = r"(##\d+\$\$|\[ID:\d+\])"
 DEFAULT_ERROR_STATUS_CODE = 502

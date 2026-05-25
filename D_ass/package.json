@@ -5,11 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "vue-tsc -b",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "test:citation": "node scripts/test-citation-state.cjs"
+    "test": "npm run test:citation && npm run test:session-list",
+    "check": "npm run typecheck && npm run test",
+    "test:citation": "node scripts/test-citation-state.cjs",
+    "test:session-list": "node scripts/test-session-list.cjs"
   },
   "dependencies": {
+    "js-base64": "^3.7.8",
+    "jsencrypt": "^3.5.4",
     "vue": "^3.5.24"
   },
   "devDependencies": {
