@@ -151,7 +151,7 @@ class RagflowConfigAdapter:
             prompt_payload["quote"] = command.quote
             prompt_payload["show_quote"] = command.quote
         if should_patch_prompt:
-            update_payload["prompt"] = prompt_payload
+            update_payload["prompt_config"] = prompt_payload
 
         response_payload = self._client.patch(
             f"/chats/{chat_id}",
