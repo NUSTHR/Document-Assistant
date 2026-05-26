@@ -10,6 +10,7 @@ import type {
   RagflowChatConfig,
   RagflowDatasetConfig,
   RagflowModelOption,
+  UpdateRagflowChatConfigDraftPayload,
 } from '../types/integration'
 
 export interface ModelOption {
@@ -120,27 +121,12 @@ export function useRagflowConfiguration() {
   }
 
   async function saveKnowledgeConfig(): Promise<RagflowChatConfig | null> {
-    if (!selectedChatId.value) {
-      configErrorMessage.value = 'Select a RAGFlow assistant first.'
-      return null
-    }
-
-    configErrorMessage.value = ''
-    isSavingConfig.value = true
-
-    try {
-      const updatedChat = await updateRagflowChatConfig({
-        biz_chat_id: selectedChatId.value,
+    return saveAssistantConfig(
+      {
         biz_knowledge_base_ids: selectedDatasetIds.value,
-      })
-      replaceChat(updatedChat)
-      return updatedChat
-    } catch (error: unknown) {
-      configErrorMessage.value = toFriendlyMessage(error, 'Failed to save RAGFlow knowledge config.')
-      return null
-    } finally {
-      isSavingConfig.value = false
-    }
+      },
+      'Failed to save RAGFlow knowledge config.',
+    )
   }
 
   function toggleDataset(datasetId: string): void {
@@ -153,6 +139,19 @@ export function useRagflowConfiguration() {
   }
 
   async function saveModelConfig(modelId: string): Promise<RagflowChatConfig | null> {
+    return saveAssistantConfig(
+      {
+        biz_knowledge_base_ids: selectedDatasetIds.value,
+        llm_id: modelId.trim() || undefined,
+      },
+      'Failed to save RAGFlow model config.',
+    )
+  }
+
+  async function saveAssistantConfig(
+    payload: UpdateRagflowChatConfigDraftPayload,
+    fallbackMessage = 'Failed to save RAGFlow assistant config.',
+  ): Promise<RagflowChatConfig | null> {
     if (!selectedChatId.value) {
       configErrorMessage.value = 'Select a RAGFlow assistant first.'
       return null
@@ -164,13 +163,13 @@ export function useRagflowConfiguration() {
     try {
       const updatedChat = await updateRagflowChatConfig({
         biz_chat_id: selectedChatId.value,
-        biz_knowledge_base_ids: selectedDatasetIds.value,
-        llm_id: modelId.trim() || undefined,
+        ...payload,
       })
       replaceChat(updatedChat)
+      selectedDatasetIds.value = [...updatedChat.biz_knowledge_base_ids]
       return updatedChat
     } catch (error: unknown) {
-      configErrorMessage.value = toFriendlyMessage(error, 'Failed to save RAGFlow model config.')
+      configErrorMessage.value = toFriendlyMessage(error, fallbackMessage)
       return null
     } finally {
       isSavingConfig.value = false
@@ -192,6 +191,7 @@ export function useRagflowConfiguration() {
     modelOptions,
     replaceChat,
     resetConfigState,
+    saveAssistantConfig,
     saveKnowledgeConfig,
     saveModelConfig,
     selectedChat,

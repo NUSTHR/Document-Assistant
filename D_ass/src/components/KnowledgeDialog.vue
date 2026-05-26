@@ -3,22 +3,11 @@ import { computed } from 'vue'
 
 import type { ModelOption } from '../composables/useRagflowConfiguration'
 import type {
+  AssistantTuningDraft,
   RagflowChatConfig,
   RagflowDatasetConfig,
-  UpdateRagflowChatConfigPayload,
+  UpdateRagflowChatConfigDraftPayload,
 } from '../types/integration'
-
-interface AssistantTuningDraft {
-  llmId: string
-  similarityThreshold: number
-  vectorSimilarityWeight: number
-  topK: number
-  topN: number
-  rerankId: string
-  promptSystem: string
-  emptyResponse: string
-  quote: boolean
-}
 
 const props = defineProps<{
   chats: RagflowChatConfig[]
@@ -36,7 +25,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'close'): void
   (event: 'load-config'): void
-  (event: 'save-config', payload: Omit<UpdateRagflowChatConfigPayload, 'biz_chat_id'>): void
+  (event: 'save-config', payload: UpdateRagflowChatConfigDraftPayload): void
   (event: 'toggle-dataset', datasetId: string): void
   (event: 'update:selectedChatId', value: string): void
   (event: 'update:tuningDraft', value: AssistantTuningDraft): void

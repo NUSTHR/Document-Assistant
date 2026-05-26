@@ -1,103 +1,25 @@
-INFO:     127.0.0.1:56258 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56667 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61477 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:61477 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61566 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:61477 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61567 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:61568 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:61568 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:61568 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61477 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:61581 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:56079 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:56079 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56088 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:56089 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59643 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:59643 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59651 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59650 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59667 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:59667 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59674 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59675 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59684 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:59684 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59691 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59692 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:60669 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:60669 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60678 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:60676 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:60685 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:60685 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60692 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:60693 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59929 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:59929 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59936 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59938 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59947 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:59947 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59953 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59954 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:53290 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:53290 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53296 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:53297 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:53719 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:53719 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53726 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:53727 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:57232 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:57232 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57238 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:57239 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59513 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:59520 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59519 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:59518 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54804 - "GET /api/auth/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52318 - "GET /api/auth/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52320 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52849 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:52849 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52849 - "GET / HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:52849 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52968 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:52969 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:51941 - "GET /api/auth/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51943 - "POST /api/auth/login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59681 - "GET /api/ragflow/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59493 - "GET /api/ragflow/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59463 - "GET /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59799 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64466 - "POST /api/chat HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55073 - "GET /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61533 - "POST /api/chat HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57051 - "GET /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61498 - "PUT /api/ragflow/chats/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63304 - "POST /api/chat HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60362 - "GET /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59680 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56393 - "GET /api/auth/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56393 - "GET /api/ragflow/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56393 - "GET /api/ragflow/models HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56393 - "GET /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56393 - "GET /api/files?knowledge_base_name=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56393 - "GET /api/files/detail?knowledge_base_name=1&biz_file_id=UNKNOWN HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49354 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:49354 - "GET /api/files?knowledge_base_name=1 HTTP/1.1" 401 Unauthorized
-INFO:     127.0.0.1:49354 - "GET /api/auth/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49354 - "GET /api/ragflow/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49354 - "GET /api/files?knowledge_base_name=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49354 - "GET /api/files/content?knowledge_base_name=1&biz_file_id=UNKNOWN HTTP/1.1" 500 Internal Server Error
-INFO:     127.0.0.1:49364 - "GET /api/chat/complete HTTP/1.1" 405 Method Not Allowed
-INFO:     127.0.0.1:55765 - "GET /api/ragflow/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55765 - "PUT /api/ragflow/chats/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55765 - "GET /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55765 - "PUT /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions/session_340d438d40574a4ee9df6871 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59355 - "GET /api/ragflow/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59355 - "POST /api/chat/complete HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59355 - "DELETE /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions/session_291e733c61a85278bd569533 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55418 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61161 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55689 - "GET /api/ragflow/config HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:60408 - "GET /api/ragflow/config HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:60410 - "GET /api/ragflow/config HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:64125 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59175 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60744 - "GET /api/ragflow/config HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:59063 - "GET /api/auth/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58301 - "GET /api/ragflow/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58301 - "GET /api/ragflow/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58301 - "GET /api/files?knowledge_base_name=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58301 - "GET /api/files/content?knowledge_base_name=1&biz_file_id=UNKNOWN HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64190 - "GET /api/auth/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61181 - "GET /api/auth/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62774 - "GET /api/auth/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52014 - "GET /api/ragflow/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52014 - "GET /api/ragflow/chats/chat_e1e7fd2efa4599392f76b55c/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52014 - "GET /api/files?knowledge_base_name=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52014 - "GET /api/files/detail?knowledge_base_name=1&biz_file_id=UNKNOWN HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55396 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55398 - "GET /api/ragflow/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55398 - "GET /api/ragflow/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55672 - "GET /api/auth/config HTTP/1.1" 502 Bad Gateway
+INFO:     127.0.0.1:60338 - "POST /api/auth/login HTTP/1.1" 502 Bad Gateway

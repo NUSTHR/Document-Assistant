@@ -23,7 +23,6 @@ import {
   loginWithRagflow,
   logoutFromRagflow,
   registerWithRagflow,
-  updateRagflowChatConfig,
   updateRagflowChatSession,
 } from './lib/integration-api'
 import {
@@ -31,6 +30,10 @@ import {
   readAuthUser,
   readAuthorization,
 } from './lib/auth-state'
+import {
+  createEmptyAssistantTuningDraft,
+  toAssistantTuningDraft,
+} from './lib/assistant-config'
 import { toFriendlyMessage } from './lib/workspace-errors'
 import { toAnswerSegments } from './lib/workspace-presenters'
 import {
@@ -49,9 +52,10 @@ import {
 import type {
   ChatReference,
   AuthConfigResponse,
+  AssistantTuningDraft,
   AuthUser,
   RagflowSession,
-  UpdateRagflowChatConfigPayload,
+  UpdateRagflowChatConfigDraftPayload,
 } from './types/integration'
 import type { AnswerSegment } from './types/workspace'
 
@@ -82,18 +86,6 @@ interface AnswerPresentation {
   answer: string
   thought: string
   hasThought: boolean
-}
-
-interface AssistantTuningDraft {
-  llmId: string
-  similarityThreshold: number
-  vectorSimilarityWeight: number
-  topK: number
-  topN: number
-  rerankId: string
-  promptSystem: string
-  emptyResponse: string
-  quote: boolean
 }
 
 const PROFILE_IMAGE_URL =
@@ -174,6 +166,7 @@ const {
   loadModels,
   modelOptions,
   resetConfigState,
+  saveAssistantConfig: persistAssistantConfig,
   saveKnowledgeConfig: persistKnowledgeConfig,
   saveModelConfig: persistModelConfig,
   selectedChat,
@@ -986,7 +979,7 @@ async function applyChatSelection(
 }
 
 async function saveKnowledgeConfig(
-  payload?: Omit<UpdateRagflowChatConfigPayload, 'biz_chat_id'>,
+  payload?: UpdateRagflowChatConfigDraftPayload,
 ): Promise<void> {
   const updatedChat = payload
     ? await persistAssistantConfig(payload)
@@ -997,6 +990,7 @@ async function saveKnowledgeConfig(
 
   assistantName.value = updatedChat.name
   assistantChatId.value = updatedChat.biz_chat_id
+  assistantTuningDraft.value = toAssistantTuningDraft(updatedChat)
   const firstDataset = datasets.value.find((dataset) => {
     return updatedChat.biz_knowledge_base_ids.includes(dataset.biz_knowledge_base_id)
   })
@@ -1004,37 +998,6 @@ async function saveKnowledgeConfig(
     knowledgeBaseName.value = firstDataset.name
   } else {
     knowledgeBaseName.value = ''
-  }
-}
-
-async function persistAssistantConfig(
-  payload: Omit<UpdateRagflowChatConfigPayload, 'biz_chat_id'>,
-) {
-  if (!selectedChatId.value) {
-    configErrorMessage.value = 'Select a RAGFlow assistant first.'
-    return null
-  }
-
-  configErrorMessage.value = ''
-  isSavingConfig.value = true
-  try {
-    const updatedChat = await updateRagflowChatConfig({
-      biz_chat_id: selectedChatId.value,
-      ...payload,
-    })
-    chats.value = chats.value.map((chat) => {
-      return chat.biz_chat_id === updatedChat.biz_chat_id ? updatedChat : chat
-    })
-    selectedChatId.value = updatedChat.biz_chat_id
-    selectedDatasetIds.value = [...updatedChat.biz_knowledge_base_ids]
-    configLlmId.value = updatedChat.llm_id
-    assistantTuningDraft.value = toAssistantTuningDraft(updatedChat)
-    return updatedChat
-  } catch (error: unknown) {
-    configErrorMessage.value = toFriendlyMessage(error, 'Failed to save RAGFlow assistant config.')
-    return null
-  } finally {
-    isSavingConfig.value = false
   }
 }
 
@@ -1150,68 +1113,6 @@ function normalizeComparableMessage(value: string): string {
   return normalizedValue.replace(/\s+/g, ' ').trim()
 }
 
-function createEmptyAssistantTuningDraft(): AssistantTuningDraft {
-  return {
-    llmId: '',
-    similarityThreshold: 0.1,
-    vectorSimilarityWeight: 0.3,
-    topK: 1024,
-    topN: 6,
-    rerankId: '',
-    promptSystem: '',
-    emptyResponse: '',
-    quote: true,
-  }
-}
-
-function toAssistantTuningDraft(chat: {
-  llm_id: string
-  similarity_threshold: number
-  vector_similarity_weight: number
-  top_k: number
-  top_n: number
-  rerank_id: string
-  prompt_config: Record<string, unknown>
-}): AssistantTuningDraft {
-  const promptConfig = chat.prompt_config
-  return {
-    llmId: chat.llm_id,
-    similarityThreshold: clampConfigNumber(chat.similarity_threshold, 0, 1, 0.1),
-    vectorSimilarityWeight: clampConfigNumber(chat.vector_similarity_weight, 0, 1, 0.3),
-    topK: clampConfigNumber(chat.top_k, 1, 10000, 1024),
-    topN: clampConfigNumber(chat.top_n, 1, 100, 6),
-    rerankId: chat.rerank_id,
-    promptSystem: readPromptString(promptConfig, 'system') || readPromptString(promptConfig, 'prompt'),
-    emptyResponse: readPromptString(promptConfig, 'empty_response'),
-    quote: readPromptBoolean(promptConfig, 'quote', true),
-  }
-}
-
-function clampConfigNumber(
-  value: number,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  if (!Number.isFinite(value)) {
-    return fallback
-  }
-  return Math.min(max, Math.max(min, value))
-}
-
-function readPromptString(promptConfig: Record<string, unknown>, key: string): string {
-  const value = promptConfig[key]
-  return typeof value === 'string' ? value : ''
-}
-
-function readPromptBoolean(
-  promptConfig: Record<string, unknown>,
-  key: string,
-  fallback: boolean,
-): boolean {
-  const value = promptConfig[key]
-  return typeof value === 'boolean' ? value : fallback
-}
 function readStringArray(storageKey: string): string[] {
   try {
     const value = window.localStorage.getItem(storageKey)

@@ -173,4 +173,21 @@ export interface UpdateRagflowChatConfigPayload {
   quote?: boolean
 }
 
+export type UpdateRagflowChatConfigDraftPayload = Omit<
+  UpdateRagflowChatConfigPayload,
+  'biz_chat_id'
+>
+
+export interface AssistantTuningDraft {
+  llmId: string
+  similarityThreshold: number
+  vectorSimilarityWeight: number
+  topK: number
+  topN: number
+  rerankId: string
+  promptSystem: string
+  emptyResponse: string
+  quote: boolean
+}
+
 export type IntegrationErrorKind = 'timeout' | 'network' | 'http' | 'invalid_response' | 'stream'

@@ -103,6 +103,5 @@ def get_file_content(
             "Content-Disposition": (
                 f"inline; filename*=UTF-8''{encoded_file_name}"
             ),
-            "X-File-Name": result.biz_file_name,
         },
     )
