@@ -1,5 +1,6 @@
 import { appConfig } from '../config/app-config'
 import type { IntegrationErrorKind } from '../types/integration'
+import { emitAuthorizationExpired } from './auth-events'
 import { readAuthorization } from './auth-state'
 
 interface ErrorPayload {
@@ -78,6 +79,23 @@ function getFriendlyHttpMessage(statusCode: number, fallbackMessage: string): st
   return fallbackMessage || `Request failed with status ${statusCode}.`
 }
 
+function isAuthorizationFailure(
+  path: string,
+  statusCode: number,
+  message: string,
+): boolean {
+  if (AUTH_FREE_PATHS.has(path)) {
+    return false
+  }
+
+  const normalizedMessage = message.toLowerCase()
+  return (
+    statusCode === 401 ||
+    normalizedMessage.includes('missing ragflow authorization') ||
+    normalizedMessage.includes('missing authorization')
+  )
+}
+
 async function parseErrorPayload(response: Response): Promise<string> {
   const responseText = await response.text()
   if (!responseText) {
@@ -129,11 +147,11 @@ export async function requestJson<TResponse>(
 
     if (!response.ok) {
       const errorMessage = await parseErrorPayload(response)
-      throw new IntegrationApiError(
-        'http',
-        getFriendlyHttpMessage(response.status, errorMessage),
-        response.status,
-      )
+      const friendlyMessage = getFriendlyHttpMessage(response.status, errorMessage)
+      if (isAuthorizationFailure(path, response.status, errorMessage || friendlyMessage)) {
+        emitAuthorizationExpired(friendlyMessage)
+      }
+      throw new IntegrationApiError('http', friendlyMessage, response.status)
     }
 
     return (await response.json()) as TResponse
@@ -169,11 +187,11 @@ export async function requestBlob(
 
     if (!response.ok) {
       const errorMessage = await parseErrorPayload(response)
-      throw new IntegrationApiError(
-        'http',
-        getFriendlyHttpMessage(response.status, errorMessage),
-        response.status,
-      )
+      const friendlyMessage = getFriendlyHttpMessage(response.status, errorMessage)
+      if (isAuthorizationFailure(path, response.status, errorMessage || friendlyMessage)) {
+        emitAuthorizationExpired(friendlyMessage)
+      }
+      throw new IntegrationApiError('http', friendlyMessage, response.status)
     }
 
     const blob = await response.blob()
@@ -213,11 +231,11 @@ export async function openSseStream(
 
     if (!response.ok) {
       const errorMessage = await parseErrorPayload(response)
-      throw new IntegrationApiError(
-        'http',
-        getFriendlyHttpMessage(response.status, errorMessage),
-        response.status,
-      )
+      const friendlyMessage = getFriendlyHttpMessage(response.status, errorMessage)
+      if (isAuthorizationFailure(path, response.status, errorMessage || friendlyMessage)) {
+        emitAuthorizationExpired(friendlyMessage)
+      }
+      throw new IntegrationApiError('http', friendlyMessage, response.status)
     }
 
     if (!response.body) {

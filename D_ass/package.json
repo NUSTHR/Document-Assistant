@@ -8,10 +8,12 @@
     "typecheck": "vue-tsc -b",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "test": "npm run test:citation && npm run test:session-list",
+    "test": "npm run test:citation && npm run test:session-list && npm run test:chat-presentation && npm run test:ragflow-chat-state",
     "check": "npm run typecheck && npm run test",
     "test:citation": "node scripts/test-citation-state.cjs",
-    "test:session-list": "node scripts/test-session-list.cjs"
+    "test:session-list": "node scripts/test-session-list.cjs",
+    "test:chat-presentation": "node scripts/test-chat-presentation.cjs",
+    "test:ragflow-chat-state": "node scripts/test-ragflow-chat-state.cjs"
   },
   "dependencies": {
     "js-base64": "^3.7.8",

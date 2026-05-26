@@ -38,11 +38,12 @@ body,
   height: 100%;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 body {
   margin: 0;
-  overflow: hidden;
+  overflow: auto;
   background: var(--background);
   color: var(--on-background);
 }
@@ -525,6 +526,26 @@ a {
   color: var(--primary);
 }
 
+.app-sidebar {
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.sidebar-brand,
+.sidebar-new-chat,
+.sidebar-footer {
+  min-height: 0;
+}
+
+.sidebar-session-nav {
+  padding-right: 2px;
+  overscroll-behavior: contain;
+}
+
+.sidebar-footer {
+  background: var(--surface);
+}
+
 .chat-scroll-area {
   overscroll-behavior: contain;
   scroll-behavior: smooth;
@@ -602,6 +623,10 @@ a {
   border-top: 1px solid rgba(198, 198, 205, 0.72);
   background: linear-gradient(to top, var(--surface), rgba(252, 248, 250, 0.96));
   padding: 16px;
+}
+
+.chat-input-area input {
+  min-width: 0;
 }
 
 .chat-availability-message {
@@ -1200,5 +1225,70 @@ a {
   .settings-grid { grid-template-columns: 1fr; }
   .assistant-config-grid { grid-template-columns: 1fr; }
   .parameter-grid { grid-template-columns: 1fr; }
+  .app-main {
+    height: calc(100dvh - 49px);
+  }
+  .citation-pane {
+    min-height: 0;
+    max-height: 42dvh;
+  }
+  .chat-pane-header {
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .chat-heading {
+    min-width: 0;
+    gap: 10px;
+  }
+  .chat-heading h2,
+  .chat-heading p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-height: 760px) {
+  .app-sidebar {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .sidebar-brand {
+    margin-bottom: 12px;
+  }
+  .sidebar-brand h1 {
+    font-size: 20px;
+    line-height: 26px;
+  }
+  .sidebar-brand p,
+  .sidebar-user-card {
+    display: none;
+  }
+  .sidebar-new-chat {
+    margin-bottom: 12px;
+  }
+  .sidebar-footer {
+    padding-top: 10px;
+  }
+  .chat-pane-header,
+  .pane-header {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .chat-input-area {
+    padding: 10px 12px;
+  }
+  .space-y-stack-lg > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 18px;
+  }
+}
+
+@media (max-height: 560px) {
+  .chat-pane-header {
+    position: relative;
+  }
+  .chat-input-area > p:last-child {
+    display: none;
+  }
 }
 

@@ -10,88 +10,36 @@ import MobileTopBar from './components/MobileTopBar.vue'
 import SessionDialog from './components/SessionDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import SourceModal from './components/SourceModal.vue'
+import { useAuthFlow } from './composables/useAuthFlow'
+import { useChatPresentation } from './composables/useChatPresentation'
+import { useChatSessions } from './composables/useChatSessions'
+import { useChatUiState } from './composables/useChatUiState'
 import { useRagWorkspace } from './composables/useRagWorkspace'
 import { useRagflowConfiguration, type ModelOption } from './composables/useRagflowConfiguration'
 import { useSessionCitationSnapshots } from './composables/useSessionCitationSnapshots'
 import { useSourceReferences } from './composables/useSourceReferences'
 import {
-  deleteRagflowChatSession,
-  getAuthConfig,
-  getAuthUser,
   getRagflowConfig,
-  listRagflowChatSessions,
-  loginWithRagflow,
-  logoutFromRagflow,
-  registerWithRagflow,
-  updateRagflowChatSession,
 } from './lib/integration-api'
-import {
-  clearAuthorization,
-  readAuthUser,
-  readAuthorization,
-} from './lib/auth-state'
 import {
   createEmptyAssistantTuningDraft,
   toAssistantTuningDraft,
 } from './lib/assistant-config'
-import { toFriendlyMessage } from './lib/workspace-errors'
-import { toAnswerSegments } from './lib/workspace-presenters'
-import {
-  extractCitedReferenceNumbers,
-  resolveReferenceNumbers,
-} from './lib/citation-sources'
 import {
   resolveActiveCitationMessageId,
 } from './lib/citation-state'
+import { isUnavailableChatError } from './lib/ragflow-chat-state'
 import {
-  createDraftSession,
-  DRAFT_SESSION_ID,
   isDraftSessionId,
-  upsertSessionSummary,
 } from './lib/session-list'
 import type {
-  ChatReference,
-  AuthConfigResponse,
   AssistantTuningDraft,
-  AuthUser,
-  RagflowSession,
   UpdateRagflowChatConfigDraftPayload,
 } from './types/integration'
-import type { AnswerSegment } from './types/workspace'
-
-interface SessionItem {
-  id: string
-  name: string
-  isPinned: boolean
-  isDraft: boolean
-}
-
-interface TranscriptMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  answerContent: string
-  thoughtContent: string
-  hasThought: boolean
-  references: ChatReference[]
-  referenceNumbers: number[]
-  citedReferenceNumbers: number[]
-  answerSegments: AnswerSegment[]
-}
-
-type SessionDialogMode = 'rename' | 'delete'
-type AuthMode = 'login' | 'register'
-
-interface AnswerPresentation {
-  answer: string
-  thought: string
-  hasThought: boolean
-}
+import type { SessionItem } from './types/chat'
 
 const PROFILE_IMAGE_URL =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDbV0EIMb7_6jlpqgIBumGrr4GpUZE_0i0TppiJtIlLBwFrjo0u4wZbHFbJ_l3rvQuplzUJrjKfzp8Kb1FHpN4PfzAGspFlJSpsMIfYkez0HKBF-gDKLpZ-ppeBKaMJLWLLx_FGh52AHmlO4dpd1CXeshfz5fL2kWbvd8DmN43MRd3n43iy24RRc8MdOlUsQRi2MBMyO6Edf5YBtQ2FRmUBGy7hBpRVIfOA1IbQQM7jTNTgq-iD9Ny8I1VdSoeh4GExy8w8uT_9_Jh2'
-
-const PINNED_SESSIONS_STORAGE_KEY = 'documentation-assistant:pinned-sessions'
 
 const {
   assistantChatId,
@@ -123,35 +71,18 @@ const {
 } = useSessionCitationSnapshots()
 
 const modelOpen = ref<boolean>(false)
-const openSessionMenuId = ref<string>('')
 const isKnowledgeOpen = ref<boolean>(false)
 const isSettingsOpen = ref<boolean>(false)
-const isLoadingSessions = ref<boolean>(false)
 const isApplyingConfigSelection = ref<boolean>(false)
 const isRecoveringChatSelection = ref<boolean>(false)
-const sessions = ref<RagflowSession[]>([])
-const draftSession = ref<RagflowSession | null>(null)
-const pinnedSessionIds = ref<string[]>(readStringArray(PINNED_SESSIONS_STORAGE_KEY))
-const chatScrollElement = ref<HTMLElement | null>(null)
-const openThoughtIds = ref<string[]>([])
-const flashedActionKey = ref<string>('')
-const sessionDialogMode = ref<SessionDialogMode | null>(null)
-const pendingSessionItem = ref<SessionItem | null>(null)
-const pendingSessionName = ref<string>('')
-const isSessionActionBusy = ref<boolean>(false)
-const isAuthenticated = ref<boolean>(readAuthorization().trim().length > 0)
-const authUser = ref<AuthUser | null>(readAuthUser())
-const authMode = ref<AuthMode>('login')
-const authEmail = ref<string>('')
-const authPassword = ref<string>('')
-const authNickname = ref<string>('')
-const authErrorMessage = ref<string>('')
-const isAuthBusy = ref<boolean>(false)
-const authConfig = ref<AuthConfigResponse>({
-  register_enabled: true,
-  disable_password_login: false,
-})
 const assistantTuningDraft = ref<AssistantTuningDraft>(createEmptyAssistantTuningDraft())
+const {
+  chatScrollElement,
+  copyAnswer,
+  flashedActionKey,
+  openThoughtIds,
+  toggleThought,
+} = useChatUiState()
 
 const {
   applyConfig,
@@ -175,164 +106,102 @@ const {
   toggleDataset,
 } = useRagflowConfiguration()
 
-const profileName = computed(() => {
-  return authUser.value?.nickname || authUser.value?.email || 'RAGFlow User'
+const {
+  authConfig,
+  authEmail,
+  authErrorMessage,
+  authMode,
+  authNickname,
+  authPassword,
+  authSubmitLabel,
+  authTitle,
+  authUser,
+  canSubmitAuth,
+  initializeAuth,
+  isAuthenticated,
+  signOut,
+  submitAuth,
+  switchAuthMode,
+  profileName,
+} = useAuthFlow({
+  onExistingSessionLoaded: loadConfig,
+  onSignedIn: async () => {
+    resetWorkspaceForAuthChange()
+    await loadConfig()
+    void checkHealth()
+  },
+  onSignedOut: resetWorkspaceForAuthChange,
 })
 
 const profileSubtitle = computed(() => {
   return authUser.value?.email || healthStatus.value
 })
 
-const authTitle = computed(() => {
-  return authMode.value === 'login' ? 'Sign in' : 'Create account'
-})
-
-const authSubmitLabel = computed(() => {
-  if (isAuthBusy.value) {
-    return authMode.value === 'login' ? 'Signing in...' : 'Creating...'
-  }
-  return authMode.value === 'login' ? 'Sign in' : 'Register'
-})
-
-const canSubmitAuth = computed(() => {
-  const hasRequiredFields =
-    authEmail.value.trim().length > 0 &&
-    authPassword.value.length > 0 &&
-    (
-      authMode.value === 'login' ||
-      authNickname.value.trim().length > 0
+const chatSessions = useChatSessions(selectedChatId, sessionId, sessionName, {
+  onSessionLoaded: (activeSession) => {
+    activeCitationMessageId.value = resolveActiveCitationMessageId(
+      activeSession,
+      activeCitationMessageId.value,
     )
-  return hasRequiredFields && !isAuthBusy.value && !authConfig.value.disable_password_login
-})
-
-const selectedSession = computed(() => {
-  if (!sessionId.value) {
-    return null
-  }
-
-  if (isDraftSessionId(sessionId.value)) {
-    return draftSession.value
-  }
-
-  return sessions.value.find((session) => session.biz_session_id === sessionId.value) ?? null
-})
-
-const sessionItems = computed<SessionItem[]>(() => {
-  const persistedSessionItems = sessions.value
-    .map((session) => {
-      return {
-        id: session.biz_session_id,
-        name: session.name,
-        isPinned: pinnedSessionIds.value.includes(session.biz_session_id),
-        isDraft: false,
-      }
-    })
-    .sort((left, right) => Number(right.isPinned) - Number(left.isPinned))
-
-  if (!draftSession.value) {
-    return persistedSessionItems
-  }
-
-  return [
-    {
-      id: draftSession.value.biz_session_id,
-      name: draftSession.value.name,
-      isPinned: false,
-      isDraft: true,
-    },
-    ...persistedSessionItems,
-  ]
-})
-
-const transcriptMessages = computed<TranscriptMessage[]>(() => {
-  const rawMessages = selectedSession.value?.messages ?? []
-  return rawMessages.flatMap((message, index) => {
-    const role = String(message.role ?? '')
-    const content = String(message.content ?? '').trim()
-    if ((role !== 'user' && role !== 'assistant') || !content) {
-      return []
-    }
-    const presentation = splitThoughtContent(content)
-    const answerSegments = toAnswerSegments(presentation.answer)
-    const citedReferenceNumbers = extractCitedReferenceNumbers(answerSegments)
-    const references = message.references ?? []
-
-    return [
-      {
-        id: `${selectedSession.value?.biz_session_id ?? 'session'}-${index}`,
-        role,
-        content,
-        answerContent: presentation.answer,
-        thoughtContent: presentation.thought,
-        hasThought: presentation.hasThought,
-        references,
-        referenceNumbers: resolveReferenceNumbers(answerSegments, references.length),
-        citedReferenceNumbers,
-        answerSegments,
-      },
-    ]
-  })
-})
-
-const liveAnswerPresentation = computed<AnswerPresentation>(() => {
-  return splitThoughtContent(streamedAnswer.value)
-})
-
-const liveAnswerSegments = computed(() => {
-  return toAnswerSegments(liveAnswerPresentation.value.answer)
-})
-
-const isLiveThinkingOnly = computed(() => {
-  return (
-    isStreamingChat.value &&
-    liveAnswerPresentation.value.hasThought &&
-    liveAnswerPresentation.value.answer.length === 0
-  )
-})
-
-const liveAnswerIsStreaming = computed(() => {
-  return (
-    isStreamingChat.value &&
-    shouldShowAnswer.value &&
-    !chatErrorMessage.value &&
-    !answerIsError.value
-  )
-})
-
-const displayedTranscriptMessages = computed<TranscriptMessage[]>(() => {
-  const duplicateIds = new Set<string>()
-  const liveAnswer = chatErrorMessage.value || streamedAnswer.value
-  let matchedQuestion = false
-  let matchedAnswer = false
-
-  for (let index = transcriptMessages.value.length - 1; index >= 0; index -= 1) {
-    const message = transcriptMessages.value[index]
-    if (!message) {
-      continue
-    }
-    if (
-      !matchedQuestion &&
-      submittedQuestion.value &&
-      message.role === 'user' &&
-      contentsAreEquivalent(message.content, submittedQuestion.value)
-    ) {
-      duplicateIds.add(message.id)
-      matchedQuestion = true
-      continue
+  },
+  onSessionLoadError: async (errorMessage, chatId) => {
+    if (chatId === selectedChatId.value && isUnavailableChatError(errorMessage)) {
+      await recoverUnavailableChatSelection(errorMessage)
+      return true
     }
 
-    if (
-      !matchedAnswer &&
-      liveAnswer &&
-      message.role === 'assistant' &&
-      contentsAreEquivalent(message.content, liveAnswer)
-    ) {
-      duplicateIds.add(message.id)
-      matchedAnswer = true
-    }
-  }
+    return false
+  },
+  removeSessionCitationSnapshot,
+  resetCitationUi: (options) => resetCitationUi(options),
+  resetChat,
+})
 
-  return transcriptMessages.value.filter((message) => !duplicateIds.has(message.id))
+const {
+  closeSessionMenu,
+  closeSessionDialog,
+  confirmSessionDialog,
+  createNewChat: createNewChatSession,
+  draftSession,
+  isLoadingSessions,
+  isSessionActionBusy,
+  loadSessions: loadChatSessionsFromRagflow,
+  openSessionMenuId,
+  pendingSessionItem,
+  pendingSessionName,
+  removeSession,
+  renameSession,
+  resetSessions,
+  selectSession: selectChatSession,
+  sessionDialogMode,
+  sessionDialogSubtitle,
+  sessionDialogTitle,
+  sessionErrorMessage,
+  sessionItems,
+  syncActiveSessionSummary: syncChatSessionSummary,
+  togglePinnedSession,
+  toggleSessionMenu,
+} = chatSessions
+
+const selectedSession = computed(() => chatSessions.selectedSession.value)
+
+const {
+  answerIsError,
+  displayedTranscriptMessages,
+  findMatchingTranscriptMessage,
+  isLiveThinkingOnly,
+  liveAnswerIsStreaming,
+  liveAnswerPresentation,
+  liveAnswerSegments,
+  sessionContainsExchange,
+  shouldShowAnswer,
+  transcriptMessages,
+} = useChatPresentation({
+  chatErrorMessage,
+  isStreamingChat,
+  selectedSession,
+  streamedAnswer,
+  submittedQuestion,
 })
 
 const {
@@ -365,30 +234,6 @@ const {
   submittedQuestion,
   writeSnapshot: writeSessionCitationSnapshot,
 })
-const answerIsError = computed(() => {
-  return streamedAnswer.value.startsWith('ERROR:')
-})
-
-const shouldShowAnswer = computed(() => {
-  return streamedAnswer.value.length > 0
-})
-
-const sessionDialogTitle = computed(() => {
-  if (sessionDialogMode.value === 'delete') {
-    return 'Delete Session'
-  }
-
-  return 'Rename Session'
-})
-
-const sessionDialogSubtitle = computed(() => {
-  if (sessionDialogMode.value === 'delete') {
-    return 'This removes the selected conversation from the session list.'
-  }
-
-  return 'Update the conversation label shown in Chat Sessions.'
-})
-
 const chatAvailabilityMessage = computed(() => {
   if (isLoadingConfig.value) {
     return ''
@@ -452,17 +297,12 @@ watch(selectedChatId, async (nextChatId, previousChatId) => {
     return
   }
 
-  sessions.value = []
-  draftSession.value = null
+  resetSessions()
   sessionId.value = ''
   sessionName.value = ''
   resetCitationUi({ closePanel: true })
   resetChat()
-  await loadSessions(nextChatId)
-})
-
-watch(pinnedSessionIds, (ids) => {
-  window.localStorage.setItem(PINNED_SESSIONS_STORAGE_KEY, JSON.stringify(ids))
+  await loadChatSessions(nextChatId)
 })
 
 watch(
@@ -495,94 +335,11 @@ onMounted(() => {
   void initializeAuth()
 })
 
-async function initializeAuth(): Promise<void> {
-  await loadAuthConfig()
-  if (!readAuthorization().trim()) {
-    isAuthenticated.value = false
-    return
-  }
-
-  try {
-    authUser.value = await getAuthUser()
-    isAuthenticated.value = true
-    await loadConfig()
-  } catch (error: unknown) {
-    clearAuthorization()
-    isAuthenticated.value = false
-    authUser.value = null
-    authErrorMessage.value = toFriendlyMessage(error, 'Please sign in again.')
-  }
-}
-
-async function loadAuthConfig(): Promise<void> {
-  try {
-    authConfig.value = await getAuthConfig()
-    if (!authConfig.value.register_enabled && authMode.value === 'register') {
-      authMode.value = 'login'
-    }
-  } catch {
-    authConfig.value = {
-      register_enabled: true,
-      disable_password_login: false,
-    }
-  }
-}
-
-function switchAuthMode(nextMode: AuthMode): void {
-  authMode.value = nextMode
-  authErrorMessage.value = ''
-}
-
-async function submitAuth(): Promise<void> {
-  if (!canSubmitAuth.value) {
-    return
-  }
-
-  authErrorMessage.value = ''
-  isAuthBusy.value = true
-
-  try {
-    const session = authMode.value === 'login'
-      ? await loginWithRagflow({
-        email: authEmail.value.trim(),
-        password: authPassword.value,
-      })
-      : await registerWithRagflow({
-        email: authEmail.value.trim(),
-        nickname: authNickname.value.trim(),
-        password: authPassword.value,
-      })
-    authUser.value = session.user
-    isAuthenticated.value = true
-    authPassword.value = ''
-    resetWorkspaceForAuthChange()
-    await loadConfig()
-    void checkHealth()
-  } catch (error: unknown) {
-    authErrorMessage.value = toFriendlyMessage(error, 'Authentication failed.')
-  } finally {
-    isAuthBusy.value = false
-  }
-}
-
-async function signOut(): Promise<void> {
-  try {
-    await logoutFromRagflow()
-  } catch {
-    // Local sign-out should still clear the browser session if RAGFlow is unreachable.
-  }
-  clearAuthorization()
-  isAuthenticated.value = false
-  authUser.value = null
-  authPassword.value = ''
-  resetWorkspaceForAuthChange()
-}
-
 function resetWorkspaceForAuthChange(): void {
   isKnowledgeOpen.value = false
   isSettingsOpen.value = false
   citationsOpen.value = false
-  sessions.value = []
+  resetSessions()
   resetConfigState()
   clearUnavailableChatState()
 }
@@ -610,59 +367,6 @@ async function loadConfig(): Promise<void> {
     clearUnavailableChatState()
     configErrorMessage.value =
       'No RAGFlow chat assistant is available. Create one in RAGFlow, then refresh config.'
-  }
-}
-
-async function loadSessions(
-  chatId: string,
-  options: { recoverUnavailableChat?: boolean } = {},
-): Promise<void> {
-  isLoadingSessions.value = true
-  configErrorMessage.value = ''
-
-  try {
-    const response = await listRagflowChatSessions(chatId)
-    sessions.value = response.sessions
-    if (isDraftSessionId(sessionId.value) && draftSession.value) {
-      return
-    }
-
-    const activeSession =
-      response.sessions.find((session) => session.biz_session_id === sessionId.value) ??
-      response.sessions[0] ??
-      null
-    if (activeSession) {
-      sessionId.value = activeSession.biz_session_id
-      sessionName.value = activeSession.name
-      activeCitationMessageId.value = resolveActiveCitationMessageId(
-        activeSession,
-        activeCitationMessageId.value,
-      )
-    } else {
-      sessionId.value = ''
-      sessionName.value = ''
-      resetChat()
-    }
-  } catch (error: unknown) {
-    const errorMessage = toFriendlyMessage(error, 'Failed to load RAGFlow sessions.')
-    sessions.value = []
-    draftSession.value = null
-    sessionId.value = ''
-    sessionName.value = ''
-    resetCitationUi({ closePanel: true })
-    resetChat()
-    if (
-      (options.recoverUnavailableChat ?? true) &&
-      chatId === selectedChatId.value &&
-      isUnavailableChatError(errorMessage)
-    ) {
-      await recoverUnavailableChatSelection(errorMessage)
-      return
-    }
-
-    configErrorMessage.value = errorMessage
-  } finally {
-    isLoadingSessions.value = false
   }
 }
 
@@ -694,27 +398,10 @@ async function recoverUnavailableChatSelection(fallbackMessage: string): Promise
   }
 }
 
-function isUnavailableChatError(message: string, code = ''): boolean {
-  if (code === 'RAGFLOW_CHAT_UNAVAILABLE') {
-    return true
-  }
-
-  const normalizedMessage = message.toLowerCase()
-  return (
-    normalizedMessage.includes('chat resource was not found') ||
-    (
-      normalizedMessage.includes('chat assistant') &&
-      normalizedMessage.includes('no longer available')
-    ) ||
-    normalizedMessage.includes('no ragflow chat assistant is available')
-  )
-}
-
 function clearUnavailableChatState(): void {
   assistantChatId.value = ''
   assistantName.value = ''
-  sessions.value = []
-  draftSession.value = null
+  resetSessions()
   sessionId.value = ''
   sessionName.value = ''
   selectedDatasetIds.value = []
@@ -725,31 +412,28 @@ function clearUnavailableChatState(): void {
 }
 
 function createNewChat(): void {
-  resetChat()
   citationsOpen.value = false
-  resetCitationUi({ closePanel: true })
-  if (!selectedChatId.value) {
-    sessionId.value = ''
-    sessionName.value = ''
-    configErrorMessage.value = 'Select a RAGFlow assistant before creating a chat session.'
-    return
+  if (createNewChatSession()) {
+    configErrorMessage.value = ''
+  } else {
+    configErrorMessage.value = sessionErrorMessage.value
   }
-
-  draftSession.value = createDraftSession(selectedChatId.value)
-  sessionId.value = DRAFT_SESSION_ID
-  sessionName.value = draftSession.value.name
-  configErrorMessage.value = ''
 }
 
 function selectSession(item: SessionItem): void {
-  openSessionMenuId.value = ''
-  resetChat()
-  if (!item.isDraft) {
-    draftSession.value = null
-  }
-  sessionId.value = item.id
-  sessionName.value = item.name
+  selectChatSession(item)
   void scrollChatToBottom()
+}
+
+async function loadChatSessions(
+  chatId: string,
+  options: { recoverUnavailableChat?: boolean } = {},
+): Promise<void> {
+  configErrorMessage.value = ''
+  await loadChatSessionsFromRagflow(chatId, options)
+  if (sessionErrorMessage.value) {
+    configErrorMessage.value = sessionErrorMessage.value
+  }
 }
 
 async function submitCurrentQuestion(): Promise<void> {
@@ -777,7 +461,7 @@ async function submitCurrentQuestion(): Promise<void> {
   const completedQuestion = submittedQuestion.value || currentQuestion
   syncActiveSessionSummary()
   if (selectedChatId.value) {
-    await loadSessions(selectedChatId.value)
+    await loadChatSessions(selectedChatId.value)
   }
   if (
     sessionContainsExchange(completedQuestion, completedAnswer)
@@ -805,118 +489,11 @@ async function submitCurrentQuestion(): Promise<void> {
 }
 
 function syncActiveSessionSummary(): void {
-  if (!selectedChatId.value || !sessionId.value || isDraftSessionId(sessionId.value)) {
-    return
-  }
-
-  sessions.value = upsertSessionSummary(sessions.value, {
+  syncChatSessionSummary({
     bizChatId: selectedChatId.value,
     bizSessionId: sessionId.value,
     name: sessionName.value || submittedQuestion.value,
   })
-  draftSession.value = null
-}
-
-async function confirmSessionDialog(): Promise<void> {
-  const item = pendingSessionItem.value
-  if (!item || !sessionDialogMode.value) {
-    closeSessionDialog()
-    return
-  }
-
-  isSessionActionBusy.value = true
-  try {
-    if (sessionDialogMode.value === 'rename') {
-      await confirmRenameSession(item)
-    } else {
-      await confirmDeleteSession(item)
-    }
-    closeSessionDialog()
-  } finally {
-    isSessionActionBusy.value = false
-  }
-}
-
-async function confirmRenameSession(item: SessionItem): Promise<void> {
-  const trimmedName = pendingSessionName.value.trim()
-  if (!trimmedName || trimmedName === item.name) {
-    return
-  }
-
-  if (!selectedChatId.value) {
-    return
-  }
-
-  try {
-    const updatedSession = await updateRagflowChatSession(selectedChatId.value, item.id, {
-      name: trimmedName,
-    })
-    sessions.value = sessions.value.map((session) => {
-      return session.biz_session_id === updatedSession.biz_session_id ? updatedSession : session
-    })
-    if (sessionId.value === updatedSession.biz_session_id) {
-      sessionName.value = updatedSession.name
-    }
-  } catch {
-    await loadSessions(selectedChatId.value)
-  }
-}
-
-async function confirmDeleteSession(item: SessionItem): Promise<void> {
-  if (!selectedChatId.value) {
-    return
-  }
-
-  try {
-    const result = await deleteRagflowChatSession(selectedChatId.value, item.id)
-    if (!result.deleted) {
-      throw new Error('RAGFlow did not delete the session.')
-    }
-
-    pinnedSessionIds.value = pinnedSessionIds.value.filter((id) => id !== item.id)
-    removeSessionCitationSnapshot(item.id)
-    if (sessionId.value === item.id) {
-      resetCitationUi({ closePanel: true })
-      resetChat()
-    }
-    await loadSessions(selectedChatId.value)
-  } catch {
-    await loadSessions(selectedChatId.value)
-  }
-}
-
-function closeSessionDialog(): void {
-  sessionDialogMode.value = null
-  pendingSessionItem.value = null
-  pendingSessionName.value = ''
-}
-
-function toggleSessionMenu(item: SessionItem): void {
-  openSessionMenuId.value = openSessionMenuId.value === item.id ? '' : item.id
-}
-
-function togglePinnedSession(item: SessionItem): void {
-  openSessionMenuId.value = ''
-  if (pinnedSessionIds.value.includes(item.id)) {
-    pinnedSessionIds.value = pinnedSessionIds.value.filter((id) => id !== item.id)
-    return
-  }
-
-  pinnedSessionIds.value = [item.id, ...pinnedSessionIds.value]
-}
-
-async function renameSession(item: SessionItem): Promise<void> {
-  openSessionMenuId.value = ''
-  pendingSessionItem.value = item
-  pendingSessionName.value = item.name
-  sessionDialogMode.value = 'rename'
-}
-
-async function removeSession(item: SessionItem): Promise<void> {
-  openSessionMenuId.value = ''
-  pendingSessionItem.value = item
-  pendingSessionName.value = item.name
-  sessionDialogMode.value = 'delete'
 }
 
 function handleQuestionKeydown(event: KeyboardEvent): void {
@@ -930,38 +507,6 @@ function handleQuestionKeydown(event: KeyboardEvent): void {
   }
 }
 
-async function copyAnswer(content: string): Promise<void> {
-  const text = normalizeAnswerForAction(content)
-  if (!text) {
-    return
-  }
-
-  try {
-    await navigator.clipboard.writeText(text)
-    flashAction('copy')
-  } catch {
-    flashAction('copy')
-  }
-}
-
-function flashAction(actionKey: string): void {
-  flashedActionKey.value = actionKey
-  window.setTimeout(() => {
-    if (flashedActionKey.value === actionKey) {
-      flashedActionKey.value = ''
-    }
-  }, 420)
-}
-
-function toggleThought(messageId: string): void {
-  if (openThoughtIds.value.includes(messageId)) {
-    openThoughtIds.value = openThoughtIds.value.filter((id) => id !== messageId)
-    return
-  }
-
-  openThoughtIds.value = [...openThoughtIds.value, messageId]
-}
-
 async function applyChatSelection(
   chatId: string,
   chatName: string,
@@ -972,7 +517,7 @@ async function applyChatSelection(
     selectedChatId.value = chatId
     assistantChatId.value = chatId
     assistantName.value = chatName
-    await loadSessions(chatId, options)
+    await loadChatSessions(chatId, options)
   } finally {
     isApplyingConfigSelection.value = false
   }
@@ -1028,113 +573,6 @@ async function scrollChatToBottom(): Promise<void> {
   element.scrollTop = element.scrollHeight
 }
 
-function splitThoughtContent(content: string): AnswerPresentation {
-  const closedMatch = content.match(/<think>([\s\S]*?)<\/think>\s*([\s\S]*)/i)
-  if (closedMatch) {
-    return {
-      thought: closedMatch[1]?.trim() ?? '',
-      answer: (closedMatch[2] ?? '').trim(),
-      hasThought: true,
-    }
-  }
-
-  const openMatch = content.match(/<think>([\s\S]*)/i)
-  if (openMatch) {
-    return {
-      thought: openMatch[1]?.trim() ?? '',
-      answer: '',
-      hasThought: true,
-    }
-  }
-
-  if (!content.toLowerCase().includes('</think>')) {
-    return {
-      answer: content,
-      thought: '',
-      hasThought: false,
-    }
-  }
-
-  return {
-    thought: '',
-    answer: content.replace(/<\/?think>/gi, '').trim(),
-    hasThought: true,
-  }
-}
-
-function normalizeAnswerForAction(content: string): string {
-  return splitThoughtContent(content).answer.trim()
-}
-
-function sessionContainsExchange(questionText: string, answerText: string): boolean {
-  if (!questionText || !answerText) {
-    return false
-  }
-
-  const questionWasPersisted = Boolean(findMatchingTranscriptMessage('user', questionText))
-  const answerWasPersisted = Boolean(findMatchingTranscriptMessage('assistant', answerText))
-
-  return questionWasPersisted && answerWasPersisted
-}
-
-function findMatchingTranscriptMessage(
-  role: TranscriptMessage['role'],
-  content: string,
-): TranscriptMessage | null {
-  for (let index = transcriptMessages.value.length - 1; index >= 0; index -= 1) {
-    const message = transcriptMessages.value[index]
-    if (message?.role === role && contentsAreEquivalent(message.content, content)) {
-      return message
-    }
-  }
-
-  return null
-}
-
-function contentsAreEquivalent(left: string, right: string): boolean {
-  const normalizedLeft = normalizeComparableMessage(left)
-  const normalizedRight = normalizeComparableMessage(right)
-  if (!normalizedLeft || !normalizedRight) {
-    return false
-  }
-
-  if (normalizedLeft === normalizedRight) {
-    return true
-  }
-
-  const shortest = normalizedLeft.length < normalizedRight.length ? normalizedLeft : normalizedRight
-  const longest = normalizedLeft.length < normalizedRight.length ? normalizedRight : normalizedLeft
-  return shortest.length >= 80 && longest.includes(shortest.slice(0, 80))
-}
-
-function normalizeComparableMessage(value: string): string {
-  const presentation = splitThoughtContent(normalizeMessageContent(value))
-  const normalizedValue = presentation.answer || presentation.thought || normalizeMessageContent(value)
-  return normalizedValue.replace(/\s+/g, ' ').trim()
-}
-
-function readStringArray(storageKey: string): string[] {
-  try {
-    const value = window.localStorage.getItem(storageKey)
-    if (!value) {
-      return []
-    }
-
-    const parsed = JSON.parse(value) as unknown
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string')
-      : []
-  } catch {
-    return []
-  }
-}
-
-function normalizeMessageContent(value: string): string {
-  return value
-    .replace(/^\*\*ERROR\*\*:\s*/i, '')
-    .replace(/^ERROR:\s*/i, '')
-    .trim()
-}
 </script>
 
 <template>
@@ -1168,6 +606,7 @@ function normalizeMessageContent(value: string): string {
       :profile-subtitle="profileSubtitle"
       :session-id="sessionId"
       :session-items="sessionItems"
+      @close-session-menu="closeSessionMenu"
       @create-new-chat="createNewChat"
       @open-agent-config="isKnowledgeOpen = true"
       @open-knowledge="isKnowledgeOpen = true"
@@ -1180,10 +619,10 @@ function normalizeMessageContent(value: string): string {
       @toggle-session-menu="toggleSessionMenu"
     />
     <!-- Main Content Wrapper -->
-    <main class="flex-1 md:ml-[260px] h-full min-h-0 min-w-0 flex flex-col md:flex-row overflow-hidden pb-16 md:pb-0">
+    <main class="app-main flex-1 md:ml-[260px] h-full min-h-0 min-w-0 flex flex-col md:flex-row overflow-hidden pb-16 md:pb-0">
       <!-- Middle Column: Source Citations (40%) -->
-      <section v-show="citationsOpen" class="w-full md:w-[40%] bg-surface-container-low border-r border-outline-variant flex flex-col overflow-hidden transition-all min-h-0 min-w-0">
-        <header class="p-stack-md border-b border-outline-variant flex justify-between items-center bg-surface">
+      <section v-show="citationsOpen" class="citation-pane w-full md:w-[40%] bg-surface-container-low border-r border-outline-variant flex flex-col overflow-hidden transition-all min-h-0 min-w-0">
+        <header class="pane-header p-stack-md border-b border-outline-variant flex justify-between items-center bg-surface">
           <h2 class="font-headline-sm text-headline-sm font-semibold">Source Citations</h2>
           <span class="font-label-caps text-label-caps text-secondary bg-secondary-container px-2 py-1 rounded">{{ sourceCountLabel }}</span>
         </header>
@@ -1219,16 +658,16 @@ function normalizeMessageContent(value: string): string {
         </div>
       </section>
       <!-- Right Column: AI Response Pane (60%) -->
-      <section class="flex-1 bg-surface flex flex-col overflow-hidden relative min-h-0 min-w-0">
-        <header class="p-stack-md border-b border-outline-variant flex items-center justify-between bg-surface/80 backdrop-blur-md sticky top-0 z-10">
-          <div class="flex items-center gap-4">
+      <section class="chat-pane flex-1 bg-surface flex flex-col overflow-hidden relative min-h-0 min-w-0">
+        <header class="chat-pane-header p-stack-md border-b border-outline-variant flex items-center justify-between bg-surface/80 backdrop-blur-md sticky top-0 z-10">
+          <div class="chat-heading flex items-center gap-4">
             <button class="text-on-surface-variant hover:text-primary transition-colors focus:outline-none p-1.5 -ml-1.5 rounded-lg hover:bg-surface-container" title="Toggle Citations" type="button" @click="citationsOpen = !citationsOpen">
               <span class="material-symbols-outlined">{{ citationsOpen ? 'left_panel_close' : 'left_panel_open' }}</span>
             </button>
             <div class="bg-secondary-container text-secondary p-2 rounded-lg">
               <span class="material-symbols-outlined" data-icon="auto_awesome" data-weight="fill" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
             </div>
-            <div>
+            <div class="min-w-0">
               <h2 class="font-headline-sm text-headline-sm font-semibold">{{ chatTitle }}</h2>
               <p class="text-[12px] text-on-surface-variant uppercase tracking-wider font-label-caps">{{ chatSubtitle }}</p>
             </div>
