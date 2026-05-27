@@ -6,7 +6,7 @@ import {
   loginWithRagflow,
   logoutFromRagflow,
   registerWithRagflow,
-} from '../lib/integration-api'
+} from '../lib/auth-api'
 import {
   clearAuthorization,
   readAuthUser,

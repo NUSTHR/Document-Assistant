@@ -10,6 +10,7 @@ import MobileTopBar from './components/MobileTopBar.vue'
 import SessionDialog from './components/SessionDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import SourceModal from './components/SourceModal.vue'
+import { PROFILE_IMAGE_URL } from './config/ui-assets'
 import { useAuthFlow } from './composables/useAuthFlow'
 import { useChatPresentation } from './composables/useChatPresentation'
 import { useChatSessions } from './composables/useChatSessions'
@@ -37,9 +38,6 @@ import type {
   UpdateRagflowChatConfigDraftPayload,
 } from './types/integration'
 import type { SessionItem } from './types/chat'
-
-const PROFILE_IMAGE_URL =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuDbV0EIMb7_6jlpqgIBumGrr4GpUZE_0i0TppiJtIlLBwFrjo0u4wZbHFbJ_l3rvQuplzUJrjKfzp8Kb1FHpN4PfzAGspFlJSpsMIfYkez0HKBF-gDKLpZ-ppeBKaMJLWLLx_FGh52AHmlO4dpd1CXeshfz5fL2kWbvd8DmN43MRd3n43iy24RRc8MdOlUsQRi2MBMyO6Edf5YBtQ2FRmUBGy7hBpRVIfOA1IbQQM7jTNTgq-iD9Ny8I1VdSoeh4GExy8w8uT_9_Jh2'
 
 const {
   assistantChatId,

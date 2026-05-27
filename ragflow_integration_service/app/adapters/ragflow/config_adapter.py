@@ -4,6 +4,10 @@ from app.adapters.ragflow.anti_corruption import clean_model_answer, to_referenc
 from app.adapters.ragflow.client import RagflowHttpClient
 from app.adapters.ragflow.exceptions import RagflowIntegrationError
 from app.adapters.ragflow.identity import make_biz_id, resolve_raw_id
+from app.adapters.ragflow.prompt_config_mapper import (
+    build_prompt_config_patch,
+    read_prompt_config,
+)
 from app.adapters.ragflow.reference_alignment import apply_session_reference_sets
 from app.dto.commands import UpdateRagflowChatConfigCommand
 from app.dto.results import (
@@ -107,51 +111,12 @@ class RagflowConfigAdapter:
             llm_payload["model_name"] = llm_id
             update_payload["llm"] = llm_payload
 
-        should_patch_prompt = any(
-            value is not None
-            for value in (
-                command.similarity_threshold,
-                command.vector_similarity_weight,
-                command.top_k,
-                command.top_n,
-                command.rerank_id,
-                command.prompt_system,
-                command.empty_response,
-                command.quote,
-            )
+        prompt_root_payload, prompt_config_payload = build_prompt_config_patch(
+            current_chat,
+            command,
         )
-        prompt_payload = (
-            dict(self._read_chat_dict(current_chat, "prompt"))
-            if should_patch_prompt
-            else {}
-        )
-        if should_patch_prompt:
-            prompt_payload.update(self._read_chat_dict(current_chat, "prompt_config"))
-        if command.similarity_threshold is not None:
-            prompt_payload["similarity_threshold"] = command.similarity_threshold
-            update_payload["similarity_threshold"] = command.similarity_threshold
-        if command.vector_similarity_weight is not None:
-            prompt_payload["keywords_similarity_weight"] = 1 - command.vector_similarity_weight
-            update_payload["vector_similarity_weight"] = command.vector_similarity_weight
-        if command.top_k is not None:
-            prompt_payload["top_k"] = command.top_k
-            update_payload["top_k"] = command.top_k
-        if command.top_n is not None:
-            prompt_payload["top_n"] = command.top_n
-            update_payload["top_n"] = command.top_n
-        if command.rerank_id is not None:
-            prompt_payload["rerank_model"] = command.rerank_id
-            update_payload["rerank_id"] = command.rerank_id
-        if command.prompt_system is not None:
-            prompt_payload["system"] = command.prompt_system
-            prompt_payload["prompt"] = command.prompt_system
-        if command.empty_response is not None:
-            prompt_payload["empty_response"] = command.empty_response
-        if command.quote is not None:
-            prompt_payload["quote"] = command.quote
-            prompt_payload["show_quote"] = command.quote
-        if should_patch_prompt:
-            update_payload["prompt_config"] = prompt_payload
+        update_payload.update(prompt_root_payload)
+        update_payload.update(prompt_config_payload)
 
         response_payload = self._client.patch(
             f"/chats/{chat_id}",
@@ -313,8 +278,7 @@ class RagflowConfigAdapter:
         self,
         chat: dict[str, Any],
     ) -> RagflowChatConfigResult:
-        prompt_config = dict(self._read_chat_dict(chat, "prompt"))
-        prompt_config.update(self._read_chat_dict(chat, "prompt_config"))
+        prompt_config = read_prompt_config(chat)
         llm_config = dict(self._read_chat_dict(chat, "llm"))
         llm_config.update(self._read_chat_dict(chat, "llm_setting"))
         vector_similarity_weight = self._read_optional_float(
