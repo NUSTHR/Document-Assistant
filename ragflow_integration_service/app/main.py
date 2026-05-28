@@ -6,11 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.adapters.ragflow.exceptions import RagflowIntegrationError
-from app.api.schemas import ErrorResponse
 from app.api.routes import auth, chats, health, knowledge_bases, ragflow_config
-from app.core.constants import DEFAULT_ERROR_STATUS_CODE
+from app.api.schemas import ErrorResponse
 from app.core.config import get_settings
-
+from app.core.constants import DEFAULT_ERROR_STATUS_CODE
 
 settings = get_settings()
 logger = logging.getLogger(__name__)

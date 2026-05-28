@@ -14,7 +14,6 @@ from app.api.schemas import (
 from app.application.knowledge_base_service import KnowledgeBaseService
 from app.dto.commands import UploadKnowledgeFileCommand
 
-
 router = APIRouter(prefix="/api", tags=["files"])
 
 

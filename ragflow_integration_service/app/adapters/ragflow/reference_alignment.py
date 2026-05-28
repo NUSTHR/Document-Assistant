@@ -2,7 +2,6 @@ import re
 
 from app.dto.results import RagflowSessionMessageResult, ReferenceResult
 
-
 CLEANED_CITATION_PATTERN = re.compile(r"\[\^(?P<number>\d+)\]")
 
 
@@ -37,7 +36,7 @@ def apply_session_reference_sets(
         aligned_reference_sets = reference_sets[-len(assistant_answer_indices):]
 
     for offset, (message_index, reference_set) in enumerate(
-        zip(target_indices, aligned_reference_sets)
+        zip(target_indices, aligned_reference_sets, strict=False)
     ):
         if messages[message_index].references:
             continue

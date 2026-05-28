@@ -79,17 +79,17 @@ class RagflowHttpClient:
         for field_name, file_name, content in files:
             body_parts.extend(
                 [
-                    f"--{boundary}\r\n".encode("utf-8"),
+                    f"--{boundary}\r\n".encode(),
                     (
                         f'Content-Disposition: form-data; name="{field_name}"; '
                         f'filename="{file_name}"\r\n'
-                    ).encode("utf-8"),
+                    ).encode(),
                     b"Content-Type: application/octet-stream\r\n\r\n",
                     content,
                     b"\r\n",
                 ]
             )
-        body_parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+        body_parts.append(f"--{boundary}--\r\n".encode())
         return self._request_json(
             "POST",
             path,

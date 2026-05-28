@@ -14,7 +14,7 @@ def make_biz_id(kind: str, raw_id: str) -> str:
     secret = secret_value.encode("utf-8")
     digest = hmac.new(
         secret,
-        f"{kind}:{normalized_id}".encode("utf-8"),
+        f"{kind}:{normalized_id}".encode(),
         hashlib.sha256,
     ).hexdigest()[:24]
     return f"{kind}_{digest}"

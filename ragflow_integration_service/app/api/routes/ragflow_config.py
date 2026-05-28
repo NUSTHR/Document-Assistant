@@ -16,7 +16,6 @@ from app.api.schemas import (
 )
 from app.dto.commands import UpdateRagflowChatConfigCommand
 
-
 router = APIRouter(prefix="/api/ragflow", tags=["ragflow-config"])
 
 

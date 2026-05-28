@@ -1,14 +1,13 @@
 import re
 from typing import Any
 
-from app.dto.results import ReferenceResult
 from app.core.constants import (
     DISPLAY_NAME_TEMPLATE,
     INLINE_REFERENCE_PATTERN,
     UNKNOWN_BIZ_FILE_ID,
     UNKNOWN_BIZ_FILE_NAME,
 )
-
+from app.dto.results import ReferenceResult
 
 DISPLAY_NAME_PATTERN = re.compile(
     r"^\[biz_id:(?P<biz_file_id>[^\]]+)\](?P<biz_file_name>.+)$"
@@ -101,9 +100,7 @@ def to_reference_result(
         )
     )
 
-    similarity_score = (
-        _read_value(raw_reference, "similarity", "score", "similarity_score") or 0.0
-    )
+    similarity_score = _read_value(raw_reference, "similarity", "score", "similarity_score") or 0.0
     return ReferenceResult(
         biz_file_id=biz_file_id,
         biz_file_name=biz_file_name,

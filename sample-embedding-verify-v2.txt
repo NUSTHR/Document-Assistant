@@ -1,2 +1,0 @@
-﻿New knowledge base verification sample.
-The capital of Germany is Berlin.

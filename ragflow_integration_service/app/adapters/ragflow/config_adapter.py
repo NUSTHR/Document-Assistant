@@ -11,14 +11,13 @@ from app.adapters.ragflow.prompt_config_mapper import (
 from app.adapters.ragflow.reference_alignment import apply_session_reference_sets
 from app.dto.commands import UpdateRagflowChatConfigCommand
 from app.dto.results import (
-    RagflowSessionMessageResult,
     RagflowChatConfigResult,
     RagflowDatasetConfigResult,
     RagflowModelOptionResult,
+    RagflowSessionMessageResult,
     RagflowSessionResult,
     ReferenceResult,
 )
-
 
 _OMIT = object()
 _REFERENCE_NUMBER_KEYS = (

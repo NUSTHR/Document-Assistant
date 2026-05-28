@@ -27,6 +27,11 @@ D_ass/coverage/
 !.env.*.example
 *.log
 
+# Local request samples and working notes
+/chat-request*.json
+/sample-embedding-verify*.txt
+/diary.txt
+
 # OS/editor metadata
 .DS_Store
 Thumbs.db

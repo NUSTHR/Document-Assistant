@@ -1,3 +1,0 @@
-﻿RAGFlow embedding model verification sample.
-The capital of France is Paris.
-Documentation Assistant uses an anti-corruption layer before RAGFlow.

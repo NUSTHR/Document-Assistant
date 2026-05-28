@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 
-
 DEFAULT_PROMPT_CONFIG = {
     "system": (
         "You are Documentation Assistant, a careful assistant for answering questions "

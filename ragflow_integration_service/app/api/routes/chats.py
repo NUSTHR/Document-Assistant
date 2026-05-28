@@ -11,7 +11,6 @@ from app.application.conversation_service import ConversationService
 from app.core.constants import STREAM_CONTENT_TYPE
 from app.dto.commands import StreamChatCommand
 
-
 router = APIRouter(prefix="/api", tags=["chat"])
 UNAVAILABLE_CHAT_ERROR_CODE = "RAGFLOW_CHAT_UNAVAILABLE"
 CHAT_CONFIGURATION_ERROR_CODE = "RAGFLOW_CHAT_CONFIGURATION_ERROR"

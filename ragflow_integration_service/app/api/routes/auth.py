@@ -12,7 +12,6 @@ from app.api.schemas import (
 )
 from app.core.default_chat_agent import load_default_chat_agent_config
 
-
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
@@ -32,7 +31,10 @@ def _read_ragflow_auth_header(headers: dict[str, str]) -> str:
     raise RagflowIntegrationError("ragflow did not return an authorization header")
 
 
-def _login_response(path: str, request: AuthLoginRequest | AuthRegisterRequest) -> AuthSessionResponse:
+def _login_response(
+    path: str,
+    request: AuthLoginRequest | AuthRegisterRequest,
+) -> AuthSessionResponse:
     payload, headers = create_ragflow_client().post_with_headers(
         path,
         json_body=request.model_dump(),

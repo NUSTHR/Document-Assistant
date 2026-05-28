@@ -8,7 +8,9 @@ class FakeSettings:
     ragflow_allow_service_api_key_fallback = False
 
 
-def test_missing_authorization_rejects_ragflow_config_access(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_authorization_rejects_ragflow_config_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(dependencies, "get_settings", lambda: FakeSettings())
 
     with pytest.raises(HTTPException) as exc_info:
